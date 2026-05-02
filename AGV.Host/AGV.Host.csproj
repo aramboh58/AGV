@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-AGV.Host-46532a32-8089-43d1-995c-1062aa50143f</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ProjectReference Include="..\AGV.Core\AGV.Core.csproj" />
+    <ProjectReference Include="..\AGV.Dashboard\AGV.Dashboard.csproj" />
+    <ProjectReference Include="..\AGV.Fleet\AGV.Fleet.csproj" />
+    <ProjectReference Include="..\AGV.Grpc\AGV.Grpc.csproj" />
+    <ProjectReference Include="..\AGV.Mqtt\AGV.Mqtt.csproj" />
+    <ProjectReference Include="..\AGV.Persistence\AGV.Persistence.csproj" />
+    <ProjectReference Include="..\AGV.Routing\AGV.Routing.csproj" />
+    <ProjectReference Include="..\AGV.Simulation\AGV.Simulation.csproj" />
+    <ProjectReference Include="..\AGV.Topology\AGV.Topology.csproj" />
+    <ProjectReference Include="..\AGV.Vehicle\AGV.Vehicle.csproj" />
+    <ProjectReference Include="..\AGV.IO\AGV.IO.csproj" />
+    <ProjectReference Include="..\NYT.AGV.IO\NYT.AGV.IO.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AGV.Core\AGV.Core.csproj" />
+    <ProjectReference Include="..\AGV.Fleet\AGV.Fleet.csproj" />
+    <ProjectReference Include="..\AGV.Topology\AGV.Topology.csproj" />
+    <ProjectReference Include="..\AGV.Vehicle\AGV.Vehicle.csproj" />
+  </ItemGroup>
+
+</Project>
