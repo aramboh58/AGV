@@ -54,29 +54,20 @@ namespace AGV.Persistence.Data
                     case "SqlServer":
                         options.UseSqlServer(
                             connectionString,
-                            sql => sql
-                                .MigrationsAssembly(
-                                    "AGV.Persistence.Migrations.SqlServer")
-                                .CommandTimeout(60));
+                            sql => sql.CommandTimeout(60));
                         break;
 
                     case "MySql":
                         options.UseMySql(
                             connectionString,
                             ServerVersion.AutoDetect(connectionString),
-                            mysql => mysql
-                                .MigrationsAssembly(
-                                    "AGV.Persistence.Migrations.MySql")
-                                .CommandTimeout(60));
+                            mysql => mysql.CommandTimeout(60));
                         break;
 
                     case "Sqlite":
                         options.UseSqlite(
                             connectionString,
-                            sqlite => sqlite
-                                .MigrationsAssembly(
-                                    "AGV.Persistence.Migrations.Sqlite")
-                                .CommandTimeout(60));
+                            sqlite => sqlite.CommandTimeout(60));
                         break;
 
                     default:

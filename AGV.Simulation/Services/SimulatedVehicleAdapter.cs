@@ -36,8 +36,8 @@ namespace AGV.Simulation.Services
     {
         private readonly VehicleRegistry _registry;
         private readonly ChannelRegistry _channels;
-        private readonly RoadMapGraph _roadMap;
-        private readonly ILoggerFactory _loggerFactory;
+        private readonly RoadMapGraphHolder _roadMapHolder;
+        private RoadMapGraph RoadMap => _roadMapHolder.GetRequired(); private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger _logger;
 
         // Per-vehicle simulation state
@@ -57,12 +57,12 @@ namespace AGV.Simulation.Services
         public SimulatedVehicleAdapter(
             VehicleRegistry registry,
             ChannelRegistry channels,
-            RoadMapGraph roadMap,
+            RoadMapGraphHolder roadMapHolder,
             ILoggerFactory loggerFactory)
         {
             _registry = registry;
             _channels = channels;
-            _roadMap = roadMap;
+            _roadMapHolder = roadMapHolder;
             _loggerFactory = loggerFactory;
             _logger = loggerFactory.CreateLogger(LogDomains.Fleet);
         }
@@ -392,7 +392,7 @@ namespace AGV.Simulation.Services
             if (int.TryParse(currentNode.NodeId, out var fromId)
                 && int.TryParse(nextNode.NodeId, out var toId))
             {
-                var move = _roadMap.GetMove(fromId, toId);
+                var move = RoadMap.GetMove(fromId, toId);
                 var segmentLengthCm = move is not null
                     ? (double)move.Clothoid.ArcLength
                     : SimulationConstants.DefaultSegmentLengthCm;
@@ -406,7 +406,7 @@ namespace AGV.Simulation.Services
                         toId, state.Vehicle.CurrentMapId);
 
                     // Update interpolated position
-                    var node = _roadMap.GetNode(toId);
+                    var node = RoadMap.GetNode(toId);
                     if (node is not null)
                     {
                         state.CurrentX = node.Position.X;
@@ -416,8 +416,8 @@ namespace AGV.Simulation.Services
                 else
                 {
                     // Interpolate position between nodes
-                    var fromNode = _roadMap.GetNode(fromId);
-                    var toNode = _roadMap.GetNode(toId);
+                    var fromNode = RoadMap.GetNode(fromId);
+                    var toNode = RoadMap.GetNode(toId);
                     if (fromNode is not null && toNode is not null)
                     {
                         var pct = (decimal)(state.TravelProgress

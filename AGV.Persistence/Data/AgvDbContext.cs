@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 using AGV.Core.Entities;
+using AGV.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace AGV.Persistence.Data
@@ -50,6 +51,8 @@ namespace AGV.Persistence.Data
         public DbSet<Vehicle> Vehicles => Set<Vehicle>();
         public DbSet<VehicleFactSheet> VehicleFactSheets => Set<VehicleFactSheet>();
         public DbSet<Mission> Missions => Set<Mission>();
+        public DbSet<RoadmapVersionRecord> RoadmapVersions
+            => Set<RoadmapVersionRecord>();
 
         // ----------------------------------------------------------------
         // Model configuration
@@ -68,6 +71,27 @@ namespace AGV.Persistence.Data
             ConfigureVehicleFactSheet(modelBuilder);
             ConfigureMission(modelBuilder);
             ConfigureHistory(modelBuilder);
+            ConfigureRoadmapVersion(modelBuilder);
+        }
+
+        // ------------------------------------------------------------------
+        // Roadmap Version
+        //-------------------------------------------------------------------
+        private static void ConfigureRoadmapVersion(ModelBuilder mb)
+        {
+            mb.Entity<RoadmapVersionRecord>(e =>
+            {
+                e.ToTable("RoadmapVersion");
+                e.HasKey(r => r.VersionId);
+                e.Property(r => r.VersionId).ValueGeneratedOnAdd();
+                e.Property(r => r.VersionLabel).IsRequired().HasMaxLength(100);
+                e.Property(r => r.IsActive).IsRequired();
+                e.Property(r => r.CreatedAt).IsRequired();
+                e.Property(r => r.CreatedByUser).IsRequired().HasMaxLength(100);
+
+                e.HasIndex(r => r.IsActive)
+                 .HasDatabaseName("IX_RoadmapVersion_IsActive");
+            });
         }
 
         // ----------------------------------------------------------------

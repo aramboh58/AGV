@@ -43,7 +43,6 @@ namespace AGV.Fleet.Services
         private readonly ITrafficManager _traffic;
         private readonly IChargeQueueManager _charging;
         private readonly ICustomizationApi _customization;
-        private readonly RoadMapGraph? _roadMap;
         private readonly ILogger _logger;
         private readonly ILogger _dispatchLogger;
 
@@ -64,8 +63,7 @@ namespace AGV.Fleet.Services
             ITrafficManager traffic,
             IChargeQueueManager charging,
             ICustomizationApi customization,
-            ILoggerFactory loggerFactory,
-            RoadMapGraph? roadMap = null)
+            ILoggerFactory loggerFactory)
         {
             _registry = registry;
             _missionQueue = missionQueue;
@@ -74,7 +72,6 @@ namespace AGV.Fleet.Services
             _traffic = traffic;
             _charging = charging;
             _customization = customization;
-            _roadMap = roadMap;
             _logger = loggerFactory.CreateLogger(LogDomains.Fleet);
             _dispatchLogger = loggerFactory.CreateLogger(LogDomains.Dispatch);
         }
