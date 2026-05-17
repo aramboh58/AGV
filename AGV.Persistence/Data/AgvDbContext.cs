@@ -38,6 +38,12 @@ namespace AGV.Persistence.Data
         public DbSet<Move> Moves => Set<Move>();
         public DbSet<Area> Areas => Set<Area>();
         public DbSet<Zone> Zones => Set<Zone>();
+        public DbSet<AreaNodeRecord> AreaNodes
+            => Set<AreaNodeRecord>();
+        public DbSet<NodeBlockRecord> NodeBlocks
+            => Set<NodeBlockRecord>();
+        public DbSet<MoveBlockRecord> MoveBlocks
+            => Set<MoveBlockRecord>();
 
         // ----------------------------------------------------------------
         // Location layer
@@ -64,6 +70,9 @@ namespace AGV.Persistence.Data
             ConfigureNode(modelBuilder);
             ConfigureMove(modelBuilder);
             ConfigureArea(modelBuilder);
+            ConfigureAreaNode(modelBuilder);
+            ConfigureNodeBlock(modelBuilder);
+            ConfigureMoveBlock(modelBuilder);
             ConfigureZone(modelBuilder);
             ConfigureLocation(modelBuilder);
             ConfigureLocationAssignment(modelBuilder);
@@ -220,7 +229,65 @@ namespace AGV.Persistence.Data
                  .HasDatabaseName("UX_Area_AreaId_Version");
             });
         }
+        private static void ConfigureAreaNode(ModelBuilder mb)
+        {
+            mb.Entity<AreaNodeRecord>(e =>
+            {
+                e.ToTable("AreaNode");
+                e.HasKey(r => r.Id);
+                e.Property(r => r.Id).ValueGeneratedOnAdd();
+                e.Property(r => r.AreaId).IsRequired();
+                e.Property(r => r.NodeId).IsRequired();
+                e.Property(r => r.EffectiveFromVersionId).IsRequired();
+                e.Property(r => r.IsDeleted).IsRequired().HasDefaultValue(false);
 
+                e.HasIndex(r => new { r.AreaId, r.NodeId, r.EffectiveFromVersionId })
+                 .IsUnique()
+                 .HasDatabaseName("UX_AreaNode_Area_Node_Version");
+                e.HasIndex(r => r.NodeId)
+                 .HasDatabaseName("IX_AreaNode_NodeId");
+            });
+        }
+
+        private static void ConfigureNodeBlock(ModelBuilder mb)
+        {
+            mb.Entity<NodeBlockRecord>(e =>
+            {
+                e.ToTable("NodeBlock");
+                e.HasKey(r => r.Id);
+                e.Property(r => r.Id).ValueGeneratedOnAdd();
+                e.Property(r => r.NodeId).IsRequired();
+                e.Property(r => r.BlockReason).IsRequired();
+                e.Property(r => r.Description).HasMaxLength(500);
+                e.Property(r => r.IsEngineerBlock).IsRequired()
+                 .HasDefaultValue(false);
+
+                e.HasIndex(r => r.NodeId)
+                 .HasDatabaseName("IX_NodeBlock_NodeId");
+                e.HasIndex(r => r.IsEngineerBlock)
+                 .HasDatabaseName("IX_NodeBlock_IsEngineerBlock");
+            });
+        }
+
+        private static void ConfigureMoveBlock(ModelBuilder mb)
+        {
+            mb.Entity<MoveBlockRecord>(e =>
+            {
+                e.ToTable("MoveBlock");
+                e.HasKey(r => r.Id);
+                e.Property(r => r.Id).ValueGeneratedOnAdd();
+                e.Property(r => r.MoveId).IsRequired();
+                e.Property(r => r.BlockReason).IsRequired();
+                e.Property(r => r.Description).HasMaxLength(500);
+                e.Property(r => r.IsEngineerBlock).IsRequired()
+                 .HasDefaultValue(false);
+
+                e.HasIndex(r => r.MoveId)
+                 .HasDatabaseName("IX_MoveBlock_MoveId");
+                e.HasIndex(r => r.IsEngineerBlock)
+                 .HasDatabaseName("IX_MoveBlock_IsEngineerBlock");
+            });
+        }
         // ----------------------------------------------------------------
         // Zone
         // ----------------------------------------------------------------

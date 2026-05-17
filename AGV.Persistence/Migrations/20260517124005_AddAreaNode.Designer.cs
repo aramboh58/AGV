@@ -3,6 +3,7 @@ using System;
 using AGV.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace AGV.Persistence.Migrations
 {
     [DbContext(typeof(AgvDbContext))]
-    partial class AgvDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260517124005_AddAreaNode")]
+    partial class AddAreaNode
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.2");
@@ -1205,70 +1208,6 @@ namespace AGV.Persistence.Migrations
                         .HasDatabaseName("UX_AreaNode_Area_Node_Version");
 
                     b.ToTable("AreaNode", (string)null);
-                });
-
-            modelBuilder.Entity("AGV.Persistence.Entities.MoveBlockRecord", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<byte>("BlockReason")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsEngineerBlock")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(false);
-
-                    b.Property<int>("MoveId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("IsEngineerBlock")
-                        .HasDatabaseName("IX_MoveBlock_IsEngineerBlock");
-
-                    b.HasIndex("MoveId")
-                        .HasDatabaseName("IX_MoveBlock_MoveId");
-
-                    b.ToTable("MoveBlock", (string)null);
-                });
-
-            modelBuilder.Entity("AGV.Persistence.Entities.NodeBlockRecord", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<byte>("BlockReason")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsEngineerBlock")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(false);
-
-                    b.Property<int>("NodeId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("IsEngineerBlock")
-                        .HasDatabaseName("IX_NodeBlock_IsEngineerBlock");
-
-                    b.HasIndex("NodeId")
-                        .HasDatabaseName("IX_NodeBlock_NodeId");
-
-                    b.ToTable("NodeBlock", (string)null);
                 });
 
             modelBuilder.Entity("AGV.Persistence.Entities.RoadmapVersionRecord", b =>

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Worker">
+﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -30,6 +30,12 @@
     <ProjectReference Include="..\AGV.Simulation\AGV.Simulation.csproj" />
     <ProjectReference Include="..\AGV.IO\AGV.IO.csproj" />
     <ProjectReference Include="..\NYT.AGV.IO\NYT.AGV.IO.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="nyt_agv_roadmap.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

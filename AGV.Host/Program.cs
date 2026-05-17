@@ -230,6 +230,22 @@ try
 
     Log.Information("AGV Host Control System started successfully");
 
+    // Seed topology if empty
+    using (var scope = host.Services.CreateScope())
+    {
+        var seedService = new AGV.Persistence.Services.TopologySeedService(
+            scope.ServiceProvider
+                 .GetRequiredService<AGV.Persistence.Data.AgvDbContext>(),
+            scope.ServiceProvider
+                 .GetRequiredService<ILoggerFactory>()
+                 .CreateLogger<AGV.Persistence.Services.TopologySeedService>());
+
+        var jsonPath = Path.Combine(
+            AppContext.BaseDirectory, "nyt_agv_roadmap.json");
+
+        await seedService.SeedIfEmptyAsync(jsonPath);
+    }
+
     await host.RunAsync();
 }
 catch (Exception ex)
