@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Data.Common;
 
 using AGV.Core.Entities;
 using AGV.Core.Enums;
@@ -35,20 +36,32 @@ namespace AGV.Topology.Services
     public sealed class TopologyService
     {
         private readonly string _connectionString;
+        private readonly string _databaseProvider;
         private readonly TopologyVersionManager _versionManager;
         private readonly RuntimeBlockingState _blockingState;
 
         public TopologyService(
             string connectionString,
+            string databaseProvider,
             TopologyVersionManager versionManager,
             RuntimeBlockingState blockingState)
         {
-            _connectionString = connectionString
-                ?? throw new ArgumentNullException(nameof(connectionString));
-            _versionManager = versionManager
-                ?? throw new ArgumentNullException(nameof(versionManager));
-            _blockingState = blockingState
-                ?? throw new ArgumentNullException(nameof(blockingState));
+            _connectionString = connectionString;
+            _databaseProvider = databaseProvider;
+            _versionManager = versionManager;
+            _blockingState = blockingState;
+        }
+
+        private System.Data.Common.DbConnection CreateConnection()
+        {
+            if (_databaseProvider.Equals("Sqlite",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return new Microsoft.Data.Sqlite.SqliteConnection(
+                    _connectionString);
+            }
+            return new Microsoft.Data.SqlClient.SqlConnection(
+                _connectionString);
         }
 
         // ----------------------------------------------------------------
@@ -90,7 +103,7 @@ namespace AGV.Topology.Services
             string loadedByUser = "system",
             CancellationToken cancellationToken = default)
         {
-            using var connection = new SqlConnection(_connectionString);
+            using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
 
             // Load all topology data in parallel
@@ -127,7 +140,7 @@ namespace AGV.Topology.Services
         // ----------------------------------------------------------------
 
         private async Task<IEnumerable<Node>> LoadNodesAsync(
-            SqlConnection connection,
+            DbConnection connection,
             int versionId)
         {
             const string sql = @"
@@ -167,7 +180,7 @@ namespace AGV.Topology.Services
         // ----------------------------------------------------------------
 
         private async Task<IEnumerable<Move>> LoadMovesAsync(
-            SqlConnection connection,
+            DbConnection connection,
             int versionId)
         {
             const string sql = @"
@@ -221,7 +234,7 @@ namespace AGV.Topology.Services
         // ----------------------------------------------------------------
 
         private async Task<IEnumerable<Area>> LoadAreasAsync(
-            SqlConnection connection,
+            DbConnection connection,
             int versionId)
         {
             const string sql = @"
@@ -258,7 +271,7 @@ namespace AGV.Topology.Services
 
         private async Task<IEnumerable<(int NodeId, int AreaId)>>
             LoadAreaMembershipsAsync(
-                SqlConnection connection,
+                DbConnection connection,
                 int versionId)
         {
             const string sql = @"
@@ -278,7 +291,7 @@ namespace AGV.Topology.Services
         // ----------------------------------------------------------------
 
         private async Task LoadEngineerBlocksAsync(
-            SqlConnection connection,
+            DbConnection connection,
             int versionId)
         {
             // Load NodeBlocks
@@ -329,15 +342,25 @@ namespace AGV.Topology.Services
         private async Task<VersionInfoRow?> GetLatestVersionInfoAsync(
             CancellationToken cancellationToken)
         {
-            const string sql = @"
-                SELECT TOP 1
-                    VersionId,
-                    VersionLabel
-                FROM RoadmapVersion
-                WHERE IsActive = 1
-                ORDER BY VersionId DESC";
+            string sql = _databaseProvider.Equals("Sqlite",
+                StringComparison.OrdinalIgnoreCase)
+                ? @"
+            SELECT
+                VersionId,
+                VersionLabel
+            FROM RoadmapVersion
+            WHERE IsActive = 1
+            ORDER BY VersionId DESC
+            LIMIT 1"
+                : @"
+            SELECT TOP 1
+                VersionId,
+                VersionLabel
+            FROM RoadmapVersion
+            WHERE IsActive = 1
+            ORDER BY VersionId DESC";
 
-            using var connection = new SqlConnection(_connectionString);
+            using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
             return await connection.QueryFirstOrDefaultAsync<VersionInfoRow>(sql);
         }

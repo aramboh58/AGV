@@ -262,7 +262,7 @@ namespace AGV.Persistence.Data
                 e.Property(r => r.ActionId).HasMaxLength(100);
                 e.Property(r => r.NodeSequence).HasMaxLength(500);
                 e.Property(r => r.MqttTopic).HasMaxLength(300);
-                e.Property(r => r.RawPayload).HasColumnType("nvarchar(max)");
+                e.Property(r => r.RawPayload);
 
                 e.HasIndex(r => new { r.FlushId, r.VehicleId, r.Timestamp })
                  .HasDatabaseName("IX_ForensicCommandLog_Flush_Vehicle_Time");
@@ -286,8 +286,8 @@ namespace AGV.Persistence.Data
                  .HasColumnType("decimal(8,4)");
                 e.Property(r => r.OperatingMode).IsRequired().HasMaxLength(50);
                 e.Property(r => r.ActiveOrderId).HasMaxLength(50);
-                e.Property(r => r.ActionStates).HasColumnType("nvarchar(max)");
-                e.Property(r => r.Errors).HasColumnType("nvarchar(max)");
+                e.Property(r => r.ActionStates);
+                e.Property(r => r.Errors);
 
                 e.HasIndex(r => new { r.FlushId, r.VehicleId, r.Timestamp })
                  .HasDatabaseName("IX_ForensicStatusLog_Flush_Vehicle_Time");
@@ -305,12 +305,9 @@ namespace AGV.Persistence.Data
                 e.Property(r => r.VehicleId).IsRequired();
                 e.Property(r => r.Timestamp).IsRequired();
                 e.Property(r => r.Phase).IsRequired().HasMaxLength(50);
-                e.Property(r => r.ResourcesChecked)
-                 .HasColumnType("nvarchar(max)");
-                e.Property(r => r.CheckResults)
-                 .HasColumnType("nvarchar(max)");
-                e.Property(r => r.ResourcesLocked)
-                 .HasColumnType("nvarchar(max)");
+                e.Property(r => r.ResourcesChecked);
+                e.Property(r => r.CheckResults);
+                e.Property(r => r.ResourcesLocked);
                 e.Property(r => r.PhaseOutcome).IsRequired().HasMaxLength(50);
 
                 e.HasIndex(r => new { r.FlushId, r.VehicleId, r.Timestamp })

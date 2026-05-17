@@ -40,15 +40,16 @@ namespace AGV.Vehicle.Services
     /// </summary>
     public sealed class OrderBuilder
     {
-        private readonly RoadMapGraph _roadMap;
         private int _actionIdCounter;
 
-        public OrderBuilder(RoadMapGraph roadMap)
-        {
-            _roadMap = roadMap
-                ?? throw new ArgumentNullException(nameof(roadMap));
-        }
+        private readonly RoadMapGraphHolder _roadMapHolder;
 
+        public OrderBuilder(RoadMapGraphHolder roadMapHolder)
+        {
+            _roadMapHolder = roadMapHolder
+                ?? throw new ArgumentNullException(nameof(roadMapHolder));
+        }
+        private RoadMapGraph _roadMap => _roadMapHolder.GetRequired();
         // ----------------------------------------------------------------
         // Order construction
         // ----------------------------------------------------------------

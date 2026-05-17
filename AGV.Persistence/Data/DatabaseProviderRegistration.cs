@@ -8,6 +8,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
+using Dapper;
+
 namespace AGV.Persistence.Data
 {
     /// <summary>
@@ -54,29 +56,20 @@ namespace AGV.Persistence.Data
                     case "SqlServer":
                         options.UseSqlServer(
                             connectionString,
-                            sql => sql
-                                .MigrationsAssembly(
-                                    "AGV.Persistence.Migrations.SqlServer")
-                                .CommandTimeout(60));
+                            sql => sql.CommandTimeout(60));
                         break;
 
                     case "MySql":
                         options.UseMySql(
                             connectionString,
                             ServerVersion.AutoDetect(connectionString),
-                            mysql => mysql
-                                .MigrationsAssembly(
-                                    "AGV.Persistence.Migrations.MySql")
-                                .CommandTimeout(60));
+                            mysql => mysql.CommandTimeout(60));
                         break;
 
                     case "Sqlite":
                         options.UseSqlite(
                             connectionString,
-                            sqlite => sqlite
-                                .MigrationsAssembly(
-                                    "AGV.Persistence.Migrations.Sqlite")
-                                .CommandTimeout(60));
+                            sqlite => sqlite.CommandTimeout(60));
                         break;
 
                     default:
@@ -110,6 +103,34 @@ namespace AGV.Persistence.Data
                 .GetRequiredService<AgvDbContext>();
 
             await context.Database.MigrateAsync(cancellationToken);
+
+            // Register Dapper type handlers for SQLite numeric affinity.
+            // SQLite stores whole-number decimals as INTEGER (Int64) —
+            // these handlers coerce them back to decimal/bool correctly.
+            SqlMapper.AddTypeHandler(new SqliteDecimalTypeHandler());
+            SqlMapper.AddTypeHandler(new SqliteBoolTypeHandler());
+        }
+
+        private sealed class SqliteDecimalTypeHandler
+            : SqlMapper.TypeHandler<decimal>
+        {
+            public override decimal Parse(object value)
+                => Convert.ToDecimal(value);
+
+            public override void SetValue(
+                System.Data.IDbDataParameter parameter, decimal value)
+                => parameter.Value = value;
+        }
+
+        private sealed class SqliteBoolTypeHandler
+            : SqlMapper.TypeHandler<bool>
+        {
+            public override bool Parse(object value)
+                => Convert.ToBoolean(value);
+
+            public override void SetValue(
+                System.Data.IDbDataParameter parameter, bool value)
+                => parameter.Value = value ? 1 : 0;
         }
     }
 }
