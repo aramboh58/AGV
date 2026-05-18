@@ -8,6 +8,7 @@ using AGV.Routing.Services;
 using AGV.Simulation.Services;
 using AGV.Topology.Services;
 using AGV.Vehicle.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
 
@@ -244,6 +245,23 @@ try
             AppContext.BaseDirectory, "nyt_agv_roadmap.json");
 
         await seedService.SeedIfEmptyAsync(jsonPath);
+    }
+
+    // Load vehicles from database into VehicleRegistry
+    using (var scope = host.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider
+            .GetRequiredService<AGV.Persistence.Data.AgvDbContext>();
+        var registry = host.Services
+            .GetRequiredService<AGV.Fleet.Infrastructure.VehicleRegistry>();
+
+        var vehicles = await db.Set<AGV.Core.Entities.Vehicle>()
+            .ToListAsync();
+
+        registry.RegisterAll(vehicles);
+
+        Log.Information("VehicleRegistry loaded: {Count} vehicles",
+            vehicles.Count);
     }
 
     await host.RunAsync();

@@ -142,6 +142,13 @@ namespace AGV.Persistence.Services
             await _db.Set<RoadmapVersionRecord>()
                 .AddAsync(version, cancellationToken);
 
+            // Insert vehicle fleet
+            var vehicles = BuildFleet();
+            await _db.Set<Vehicle>().AddRangeAsync(vehicles, cancellationToken);
+
+            _logger.LogInformation(
+                "Fleet seeded: {Count} vehicles.", vehicles.Count);
+
             await _db.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
@@ -203,6 +210,34 @@ namespace AGV.Persistence.Services
             public string Direction { get; set; } = string.Empty;
             public double MaxSpeed { get; set; }
             public bool Bidirectional { get; set; }
+        }
+        private static List<Vehicle> BuildFleet()
+        {
+            var vehicles = new List<Vehicle>();
+
+            // 16 fork vehicles: F01-F16
+            for (int i = 1; i <= 16; i++)
+            {
+                vehicles.Add(new Vehicle(
+                    vehicleId: i,
+                    vehicleName: $"F{i:D2}",
+                    serialNumber: $"SN-F{i:D2}",
+                    vehicleType: VehicleType.Fork,
+                    initialMapId: "NYT_COLLEGE_POINT_V1"));
+            }
+
+            // 4 waste vehicles: W01-W04
+            for (int i = 1; i <= 4; i++)
+            {
+                vehicles.Add(new Vehicle(
+                    vehicleId: 16 + i,
+                    vehicleName: $"W{i:D2}",
+                    serialNumber: $"SN-W{i:D2}",
+                    vehicleType: VehicleType.WasteBin,
+                    initialMapId: "NYT_COLLEGE_POINT_V1"));
+            }
+
+            return vehicles;
         }
     }
 }
