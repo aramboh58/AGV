@@ -48,7 +48,10 @@ try
 
     builder.Services.Configure<SimulationOptions>(
         builder.Configuration.GetSection(SimulationOptions.SectionName));
-    
+
+    builder.Services.AddSingleton<BatteryModelOptions>(sp =>
+        sp.GetRequiredService<IOptions<BatteryModelOptions>>().Value);
+
     builder.Services.AddSingleton<SimulationOptions>(sp =>
         sp.GetRequiredService<IOptions<SimulationOptions>>().Value);
 
