@@ -264,6 +264,38 @@ try
             vehicles.Count);
     }
 
+    // Initialize charge slots from database node names
+    using (var scope = host.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider
+            .GetRequiredService<AGV.Persistence.Data.AgvDbContext>();
+        var chargeManager = host.Services
+            .GetRequiredService<AGV.Fleet.Services.ChargeQueueManagerService>();
+
+        var allNodes = await db.Set<AGV.Core.Entities.Node>()
+            .ToListAsync();
+
+        var opportunityNodeIds = allNodes
+            .Where(n => n.NodeName != null && (
+                n.NodeName.StartsWith("LC") ||
+                n.NodeName.StartsWith("UC")))
+            .Select(n => n.NodeId)
+            .ToList();
+
+        var mandatoryNodeIds = allNodes
+            .Where(n => n.NodeName != null &&
+                n.NodeName.StartsWith("MC"))
+            .Select(n => n.NodeId)
+            .ToList();
+
+        chargeManager.InitializeOpportunitySlots(opportunityNodeIds);
+        chargeManager.InitializeMandatoryStations(mandatoryNodeIds);
+
+        Log.Information(
+            "Charge slots initialized: {Opp} opportunity, {Mand} mandatory",
+            opportunityNodeIds.Count, mandatoryNodeIds.Count);
+    }
+
     await host.RunAsync();
 }
 catch (Exception ex)
