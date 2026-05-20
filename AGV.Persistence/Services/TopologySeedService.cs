@@ -33,6 +33,19 @@ namespace AGV.Persistence.Services
         private const int SeedVersionId = 1;
         private const string MapId = "NYT_COLLEGE_POINT_V1";
 
+        // Operation type IDs
+        private const int OpTypePick = 1;
+        private const int OpTypeDrop = 2;
+        private const int OpTypeCharge = 3;
+        private const int OpTypePark = 4;
+
+        // Location type IDs
+        private const int LocTypeRoll = 1;
+        private const int LocTypeWasteBin = 2;
+        private const int LocTypeCharge = 3;
+
+        private const int LocationVersionId = 1;
+
         public TopologySeedService(
             AgvDbContext db,
             ILogger<TopologySeedService> logger)
@@ -142,6 +155,19 @@ namespace AGV.Persistence.Services
             await _db.Set<RoadmapVersionRecord>()
                 .AddAsync(version, cancellationToken);
 
+            // Insert locations and assignments
+            var locationData = BuildLocations(nodeIdMap);
+            foreach (var (loc, asgn) in locationData)
+            {
+                await _db.Set<Location>().AddAsync(loc, cancellationToken);
+                await _db.Set<LocationAssignment>()
+                    .AddAsync(asgn, cancellationToken);
+            }
+
+            _logger.LogInformation(
+                "Locations seeded: {Count} locations with assignments.",
+                locationData.Count);
+
             // Insert vehicle fleet
             var vehicles = BuildFleet();
             await _db.Set<Vehicle>().AddRangeAsync(vehicles, cancellationToken);
@@ -154,6 +180,90 @@ namespace AGV.Persistence.Services
             _logger.LogInformation(
                 "Topology seeded: {Nodes} nodes, {Moves} moves.",
                 nodes.Count, moves.Count);
+        }
+
+        private static List<(Location location, LocationAssignment assignment)>
+            BuildLocations(IReadOnlyDictionary<string, int> nodeIdMap)
+        {
+            var result = new List<(Location, LocationAssignment)>();
+            int locationId = 1;
+            int assignmentId = 1;
+
+            // Staging pickup positions (STG01-STG03) — Roll pick
+            foreach (var key in new[] { "STG01", "STG02", "STG03" })
+            {
+                if (!nodeIdMap.TryGetValue(key, out var nodeId)) continue;
+
+                var loc = new Location(
+                    locationId,
+                    LocationVersionId,
+                    $"Roll Staging Pickup {key}",
+                    $"Roll pickup staging position {key}");
+
+                var asgn = new LocationAssignment(
+                    assignmentId,
+                    LocationVersionId,
+                    locationId,
+                    nodeId,
+                    OpTypePick,
+                    LocTypeRoll);
+
+                result.Add((loc, asgn));
+                locationId++;
+                assignmentId++;
+            }
+
+            // Lower press stands LPS01-LPS18 approach nodes — Roll drop
+            for (int i = 1; i <= 18; i++)
+            {
+                var key = $"LPS{i:D2}A";
+                if (!nodeIdMap.TryGetValue(key, out var nodeId)) continue;
+
+                var loc = new Location(
+                    locationId,
+                    LocationVersionId,
+                    $"Lower Press Stand {i}",
+                    $"Lower corridor press stand {i} delivery position");
+
+                var asgn = new LocationAssignment(
+                    assignmentId,
+                    LocationVersionId,
+                    locationId,
+                    nodeId,
+                    OpTypeDrop,
+                    LocTypeRoll);
+
+                result.Add((loc, asgn));
+                locationId++;
+                assignmentId++;
+            }
+
+            // Upper press stands UPS01-UPS12 approach nodes — Roll drop
+            for (int i = 1; i <= 12; i++)
+            {
+                var key = $"UPS{i:D2}A";
+                if (!nodeIdMap.TryGetValue(key, out var nodeId)) continue;
+
+                var loc = new Location(
+                    locationId,
+                    LocationVersionId,
+                    $"Upper Press Stand {i}",
+                    $"Upper corridor press stand {i} delivery position");
+
+                var asgn = new LocationAssignment(
+                    assignmentId,
+                    LocationVersionId,
+                    locationId,
+                    nodeId,
+                    OpTypeDrop,
+                    LocTypeRoll);
+
+                result.Add((loc, asgn));
+                locationId++;
+                assignmentId++;
+            }
+
+            return result;
         }
 
         // ----------------------------------------------------------------

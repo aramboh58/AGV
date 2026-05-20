@@ -299,6 +299,98 @@ try
             opportunityNodeIds.Count, mandatoryNodeIds.Count);
     }
 
+    // Wire press demand — load press stand node IDs and subscribe RollDemanded
+    using (var scope = host.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider
+            .GetRequiredService<AGV.Persistence.Data.AgvDbContext>();
+        var simOptions = host.Services
+            .GetRequiredService<SimulationOptions>();
+        var simEngine = host.Services
+            .GetRequiredService<SimulationEngineService>();
+        var fleetManager = host.Services
+            .GetRequiredService<IFleetManager>();
+
+        // Load press stand drop node IDs (LPS*A and UPS*A nodes)
+        var pressStandNodeIds = await db.Set<AGV.Core.Entities.Node>()
+            .Where(n => n.NodeName != null && (
+                (n.NodeName.StartsWith("LPS") && n.NodeName.EndsWith("A")) ||
+                (n.NodeName.StartsWith("UPS") && n.NodeName.EndsWith("A"))))
+            .Select(n => n.NodeId)
+            .ToListAsync();
+
+        simOptions.PressStandNodeIds = pressStandNodeIds;
+
+        // Load staging pickup assignment IDs keyed by node name
+        var stagingAssignments = await db.Set<AGV.Core.Entities.LocationAssignment>()
+            .Join(db.Set<AGV.Core.Entities.Node>(),
+                a => a.NodeId,
+                n => n.NodeId,
+                (a, n) => new { a.AssignmentId, n.NodeName })
+            .Where(x => x.NodeName != null &&
+                x.NodeName.StartsWith("STG"))
+            .ToListAsync();
+
+        // Build press stand drop assignment lookup: NodeId -> AssignmentId
+        var dropAssignments = await db.Set<AGV.Core.Entities.LocationAssignment>()
+            .Join(db.Set<AGV.Core.Entities.Node>(),
+                a => a.NodeId,
+                n => n.NodeId,
+                (a, n) => new { a.AssignmentId, a.NodeId, n.NodeName })
+            .Where(x => x.NodeName != null && (
+                (x.NodeName.StartsWith("LPS") && x.NodeName.EndsWith("A")) ||
+                (x.NodeName.StartsWith("UPS") && x.NodeName.EndsWith("A"))))
+            .ToDictionaryAsync(x => x.NodeId, x => x.AssignmentId);
+
+        // Pick a random staging assignment for pickup
+        var stagingAssignmentIds = stagingAssignments
+            .Select(x => x.AssignmentId)
+            .ToList();
+
+        int missionCounter = 0;
+
+        // Subscribe to RollDemanded
+        simEngine.RollDemanded += async (sender, args) =>
+        {
+            try
+            {
+                if (!dropAssignments.TryGetValue(
+                    args.PressStandNodeId, out var dropAssignmentId))
+                {
+                    Log.Warning(
+                        "RollDemanded: no assignment found for node {NodeId}",
+                        args.PressStandNodeId);
+                    return;
+                }
+
+                var pickupAssignmentId = stagingAssignmentIds[
+                    Math.Abs(Interlocked.Increment(ref missionCounter))
+                    % stagingAssignmentIds.Count];
+
+                var context = new AGV.Core.Messages.MissionContext
+                {
+                    MissionId = 0,
+                    CurrentOrderId = $"ORD{Guid.NewGuid():N}"[..12]
+                        .ToUpperInvariant(),
+                    PickupNodeId = pickupAssignmentId,
+                    DropNodeId = dropAssignmentId,
+                    Priority = AGV.Core.Enums.MissionPriority.Normal,
+                    CreatedAt = DateTime.UtcNow,
+                };
+
+                await fleetManager.EnqueueMissionAsync(context);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "RollDemanded handler failed");
+            }
+        };
+
+        Log.Information(
+            "Press demand wired: {Count} press stands, {Staging} staging positions",
+            pressStandNodeIds.Count, stagingAssignmentIds.Count);
+    }
+
     await host.RunAsync();
 }
 catch (Exception ex)
