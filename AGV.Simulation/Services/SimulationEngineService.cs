@@ -349,5 +349,10 @@ namespace AGV.Simulation.Services
         /// Random seed for reproducible simulation runs.
         /// </summary>
         public int RandomSeed { get; set; } = 42;
+
+        /// <summary>
+        /// Vehicle initial state of charge (SOC) dictionary
+        /// </summary>
+        public Dictionary<string, decimal> VehicleInitialSoc { get; set; } = new();
     }
 }

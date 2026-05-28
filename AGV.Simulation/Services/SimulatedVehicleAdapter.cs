@@ -38,6 +38,7 @@ namespace AGV.Simulation.Services
         private readonly ChannelRegistry _channels;
         private readonly RoadMapGraphHolder _roadMapHolder;
         private RoadMapGraph RoadMap => _roadMapHolder.GetRequired(); private readonly ILoggerFactory _loggerFactory;
+        private readonly BatteryModelOptions _batteryOptions;
         private readonly ILogger _logger;
 
         // Per-vehicle simulation state
@@ -58,11 +59,13 @@ namespace AGV.Simulation.Services
             VehicleRegistry registry,
             ChannelRegistry channels,
             RoadMapGraphHolder roadMapHolder,
+            BatteryModelOptions batteryOptions,
             ILoggerFactory loggerFactory)
         {
             _registry = registry;
             _channels = channels;
             _roadMapHolder = roadMapHolder;
+            _batteryOptions = batteryOptions;
             _loggerFactory = loggerFactory;
             _logger = loggerFactory.CreateLogger(LogDomains.Fleet);
         }
@@ -83,6 +86,10 @@ namespace AGV.Simulation.Services
             // Store the order for the simulation engine to execute
             state.PendingOrder = order;
             state.CurrentOrderId = order.OrderId;
+
+            state.NodeIndex = 0;
+            state.TravelProgress = 0;
+            state.StateMachine.TryTransition(ActivityState.TravelingToPickup);
 
             _logger.LogDebug(
                 "Simulated vehicle {Serial} received order {OrderId} " +
@@ -184,7 +191,7 @@ namespace AGV.Simulation.Services
                     new VehicleStateMachine(
                         vehicle.VehicleId, _loggerFactory),
                     new BatteryModel(
-                        new BatteryModelOptions(),
+                        _batteryOptions,
                         vehicle.BatteryStateOfCharge / 100m));
 
                 _simStates[vehicle.VehicleId] = simState;
@@ -194,6 +201,8 @@ namespace AGV.Simulation.Services
                     .BuildConnectionEvent(vehicle, isOnline: true);
 
                 simState.IsOnline = true;
+                vehicle.SetOnline();
+
                 await _channels.VehicleStateUpdates.Writer
                     .WriteAsync(new VehicleStateUpdate
                     {
@@ -358,6 +367,10 @@ namespace AGV.Simulation.Services
                 if (currentActivity == ActivityState.TravelingToPickup
                     || currentActivity == ActivityState.ApproachingStand)
                 {
+                    // TravelingToPickup must pass through ApproachingStand first
+                    if (currentActivity == ActivityState.TravelingToPickup)
+                        state.StateMachine.TryTransition(ActivityState.ApproachingStand);
+
                     state.StateMachine.TryTransition(
                         ActivityState.Picking);
                     state.ForkOperationTimer = 0m;
@@ -367,6 +380,9 @@ namespace AGV.Simulation.Services
                     || currentActivity ==
                     ActivityState.ApproachingDrop)
                 {
+                    if (currentActivity == ActivityState.TravelingLoaded)
+                        state.StateMachine.TryTransition(ActivityState.ApproachingDrop);
+
                     state.StateMachine.TryTransition(
                         ActivityState.Dropping);
                     state.ForkOperationTimer = 0m;

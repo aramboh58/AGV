@@ -15,6 +15,7 @@ using AGV.Persistence.Entities;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AGV.Persistence.Services
 {
@@ -46,12 +47,16 @@ namespace AGV.Persistence.Services
 
         private const int LocationVersionId = 1;
 
+        private readonly Dictionary<string, decimal> _initialSoc;
+
         public TopologySeedService(
             AgvDbContext db,
-            ILogger<TopologySeedService> logger)
+            ILogger<TopologySeedService> logger,
+            Dictionary<string, decimal> initialSoc)
         {
             _db = db;
             _logger = logger;
+            _initialSoc = initialSoc;
         }
 
         public async Task SeedIfEmptyAsync(
@@ -169,7 +174,7 @@ namespace AGV.Persistence.Services
                 locationData.Count);
 
             // Insert vehicle fleet
-            var vehicles = BuildFleet();
+            var vehicles = BuildFleet(nodeIdMap, _initialSoc);
             await _db.Set<Vehicle>().AddRangeAsync(vehicles, cancellationToken);
 
             _logger.LogInformation(
@@ -321,30 +326,79 @@ namespace AGV.Persistence.Services
             public double MaxSpeed { get; set; }
             public bool Bidirectional { get; set; }
         }
-        private static List<Vehicle> BuildFleet()
+        private static List<Vehicle> BuildFleet(
+            IReadOnlyDictionary<string, int> nodeIdMap,
+            Dictionary<string, decimal> initialSoc)
         {
             var vehicles = new List<Vehicle>();
+
+            // Initial node assignments from Python PoC config.py
+            var initialNodes = new Dictionary<int, string>
+            {
+                [1] = "LI_03",
+                [2] = "LI_05",
+                [3] = "LI_07",
+                [4] = "LI_09",
+                [5] = "LI_11",
+                [6] = "LI_13",
+                [7] = "LO_04",
+                [8] = "LO_06",
+                [9] = "UI_02",
+                [10] = "UI_04",
+                [11] = "UI_06",
+                [12] = "UI_08",
+                [13] = "UO_03",
+                [14] = "UO_05",
+                [15] = "UO_07",
+                [16] = "MC01",
+                [17] = "LO_02",
+                [18] = "LO_08",
+                [19] = "LO_12",
+                [20] = "LI_14",
+            };
 
             // 16 fork vehicles: F01-F16
             for (int i = 1; i <= 16; i++)
             {
-                vehicles.Add(new Vehicle(
+                var vehicle = new Vehicle(
                     vehicleId: i,
                     vehicleName: $"F{i:D2}",
                     serialNumber: $"SN-F{i:D2}",
                     vehicleType: VehicleType.Fork,
-                    initialMapId: "NYT_COLLEGE_POINT_V1"));
+                    initialMapId: MapId);
+
+                if (initialNodes.TryGetValue(i, out var nodeName)
+                    && nodeIdMap.TryGetValue(nodeName, out var nodeId))
+                {
+                    vehicle.UpdatePosition(nodeId, MapId);
+                }
+
+                if (initialSoc.TryGetValue(vehicle.VehicleName, out var soc))
+                    vehicle.UpdateBattery(soc);
+
+                vehicles.Add(vehicle);
             }
 
             // 4 waste vehicles: W01-W04
             for (int i = 1; i <= 4; i++)
             {
-                vehicles.Add(new Vehicle(
+                var vehicle = new Vehicle(
                     vehicleId: 16 + i,
                     vehicleName: $"W{i:D2}",
                     serialNumber: $"SN-W{i:D2}",
                     vehicleType: VehicleType.WasteBin,
-                    initialMapId: "NYT_COLLEGE_POINT_V1"));
+                    initialMapId: MapId);
+
+                if (initialNodes.TryGetValue(16 + i, out var nodeName)
+                    && nodeIdMap.TryGetValue(nodeName, out var nodeId))
+                {
+                    vehicle.UpdatePosition(nodeId, MapId);
+                }
+
+                if (initialSoc.TryGetValue(vehicle.VehicleName, out var soc))
+                    vehicle.UpdateBattery(soc);
+
+                vehicles.Add(vehicle);
             }
 
             return vehicles;

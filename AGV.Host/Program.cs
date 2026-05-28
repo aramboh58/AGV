@@ -237,12 +237,20 @@ try
     // Seed topology if empty
     using (var scope = host.Services.CreateScope())
     {
+        var db = scope.ServiceProvider
+            .GetRequiredService<AGV.Persistence.Data.AgvDbContext>();
+
+        var initialSoc = builder.Configuration
+            .GetSection("Simulation:VehicleInitialSoc")
+            .Get<Dictionary<string, decimal>>()
+            ?? new Dictionary<string, decimal>();
+
         var seedService = new AGV.Persistence.Services.TopologySeedService(
-            scope.ServiceProvider
-                 .GetRequiredService<AGV.Persistence.Data.AgvDbContext>(),
+            db,
             scope.ServiceProvider
                  .GetRequiredService<ILoggerFactory>()
-                 .CreateLogger<AGV.Persistence.Services.TopologySeedService>());
+                 .CreateLogger<AGV.Persistence.Services.TopologySeedService>(),
+            initialSoc);
 
         var jsonPath = Path.Combine(
             AppContext.BaseDirectory, "nyt_agv_roadmap.json");
