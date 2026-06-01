@@ -1,0 +1,260 @@
+@page "/"
+@using AGV.Core.Enums
+@using AGV.Fleet.Infrastructure
+@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.JSInterop
+@inject NavigationManager Nav
+@inject VehicleRegistry VehicleRegistry
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="dashboard">
+
+    <!-- ── Header ─────────────────────────────────────────────── -->
+    <header class="dash-header">
+        <div class="dash-title">
+            <span class="dash-title-main">AGV FLEET CONTROL</span>
+            <span class="dash-title-sub">New York Times · College Point Production Plant</span>
+        </div>
+        <div class="dash-header-stats">
+            <div class="stat-chip">
+                <span class="stat-label">SIM TIME</span>
+                <span class="stat-value mono" id="sim-time">00:00:00</span>
+            </div>
+            <div class="stat-chip">
+                <span class="stat-label">SPEED</span>
+                <span class="stat-value mono">60×</span>
+            </div>
+            <div class="stat-chip @(_hubConnected ? "online" : "offline")">
+                <span class="stat-dot"></span>
+                <span class="stat-label">@(_hubConnected ? "LIVE" : "CONNECTING")</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ── Body ───────────────────────────────────────────────── -->
+    <div class="dash-body">
+
+        <!-- ── Floor Map ──────────────────────────────────────── -->
+        <section class="map-panel">
+            <div class="panel-label">FLOOR MAP — NYT COLLEGE POINT</div>
+            <div class="map-container" id="map-container-placeholder"></div>
+        </section>
+
+        <!-- ── Right Panel ────────────────────────────────────── -->
+        <aside class="right-panel">
+
+            <!-- Mission Counters -->
+            <section class="counter-panel">
+                <div class="panel-label">MISSIONS</div>
+                <div class="counters">
+                    <div class="counter">
+                        <span class="counter-value" id="cnt-enqueued">@_enqueued</span>
+                        <span class="counter-label">ENQUEUED</span>
+                    </div>
+                    <div class="counter">
+                        <span class="counter-value" id="cnt-dispatched">@_dispatched</span>
+                        <span class="counter-label">DISPATCHED</span>
+                    </div>
+                    <div class="counter accent">
+                        <span class="counter-value" id="cnt-completed">@_completed</span>
+                        <span class="counter-label">COMPLETED</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Vehicle Status Grid -->
+            <section class="vehicle-panel">
+                <div class="panel-label">FLEET STATUS — 20 VEHICLES</div>
+                <div class="vehicle-grid">
+                    @foreach (var v in _vehicleStates.Values.OrderBy(v => v.VehicleId))
+                    {
+                        <div class="vehicle-card @GetStateClass(v.ActivityState)">
+                            <div class="vc-id">F@(v.VehicleId.ToString("D2"))</div>
+                            <div class="vc-state">@GetStateAbbrev(v.ActivityState)</div>
+                            <div class="vc-soc">
+                                <div class="soc-bar">
+                                    <div class="soc-fill @GetSocClass(v.SocPercent)"
+                                         style="width: @((int)v.SocPercent)%"></div>
+                                </div>
+                                <span class="soc-label">@((int)v.SocPercent)%</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
+
+        </aside>
+    </div>
+</div>
+
+@code {
+    // ----------------------------------------------------------------
+    // State
+    // ----------------------------------------------------------------
+
+    private HubConnection? _hub;
+    private bool _hubConnected;
+
+    private int _enqueued;
+    private int _dispatched;
+    private int _completed;
+
+    private readonly Dictionary<int, VehicleDisplayState> _vehicleStates = new();
+
+    // ----------------------------------------------------------------
+    // Lifecycle
+    // ----------------------------------------------------------------
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Seed vehicle states from registry so cards appear immediately
+        foreach (var vehicle in VehicleRegistry.GetAll())
+        {
+            _vehicleStates[vehicle.VehicleId] = new VehicleDisplayState
+            {
+                VehicleId = vehicle.VehicleId,
+                SerialNumber = vehicle.SerialNumber,
+                ActivityState = "Idle",
+                SocPercent = vehicle.BatteryStateOfCharge,
+            };
+        }
+
+        // Connect to SignalR hub
+        _hub = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/fleethub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hub.On<VehicleStatePayload>("UpdateVehicleState", state =>
+        {
+            _vehicleStates[state.VehicleId] = new VehicleDisplayState
+            {
+                VehicleId  = state.VehicleId,
+                SerialNumber = state.SerialNumber,
+                ActivityState = state.ActivityState,
+                SocPercent = state.SocPercent,
+                IsCharging = state.IsCharging,
+                IsLoaded   = state.IsLoaded,
+            };
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hub.On<MissionCounterPayload>("UpdateMissionCounters", counters =>
+        {
+            _enqueued   = counters.Enqueued;
+            _dispatched = counters.Dispatched;
+            _completed  = counters.Completed;
+            InvokeAsync(StateHasChanged);
+        });
+
+        // Position updates go straight to JS for smooth SVG animation
+        _hub.On<VehiclePositionPayload>("UpdateVehiclePosition", pos =>
+        {
+            var id = pos.VehicleId;
+            var x = (double)pos.X;
+            var y = (double)pos.Y;
+            var nodeId = pos.NodeId;
+            Task.Run(() => JS.InvokeVoidAsync("fleetMap.updatePosition", id, x, y, nodeId));
+        });
+
+        _hub.Reconnected += _ =>
+        {
+            _hubConnected = true;
+            return InvokeAsync(StateHasChanged);
+        };
+        _hub.Closed += _ =>
+        {
+            _hubConnected = false;
+            return InvokeAsync(StateHasChanged);
+        };
+
+        await _hub.StartAsync();
+        _hubConnected = _hub.State == HubConnectionState.Connected;
+    }
+
+    private bool _mapInitialized;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("fleetMap.init");
+            _mapInitialized = true;
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Helper methods
+    // ----------------------------------------------------------------
+
+    private static string GetStateClass(string state) => state switch
+    {
+        "Idle"                  => "state-idle",
+        "TravelingToPickup"     => "state-traveling",
+        "ApproachingStand"      => "state-traveling",
+        "TravelingLoaded"       => "state-loaded",
+        "ApproachingDrop"       => "state-loaded",
+        "Picking"               => "state-forking",
+        "Dropping"              => "state-forking",
+        "OpportunityCharging"   => "state-charging",
+        "MandatoryCharging"     => "state-charging",
+        "QueuedForCharge"       => "state-charging",
+        _                       => "state-idle",
+    };
+
+    private static string GetStateAbbrev(string state) => state switch
+    {
+        "Idle"                  => "IDLE",
+        "TravelingToPickup"     => "→PKP",
+        "ApproachingStand"      => "→STD",
+        "TravelingLoaded"       => "→DRP",
+        "ApproachingDrop"       => "→DRP",
+        "Picking"               => "PICK",
+        "Dropping"              => "DROP",
+        "OpportunityCharging"   => "CHG",
+        "MandatoryCharging"     => "CHG!",
+        "QueuedForCharge"       => "QCHG",
+        _                       => "----",
+    };
+
+    private static string GetSocClass(decimal soc) =>
+        soc < 25m ? "soc-critical" :
+        soc < 50m ? "soc-low" : "soc-ok";
+
+    // ----------------------------------------------------------------
+    // Dispose
+    // ----------------------------------------------------------------
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hub is not null)
+            await _hub.DisposeAsync();
+    }
+
+    // ----------------------------------------------------------------
+    // Local display models (SignalR payload types)
+    // ----------------------------------------------------------------
+
+    private sealed class VehicleDisplayState
+    {
+        public int VehicleId { get; set; }
+        public string SerialNumber { get; set; } = "";
+        public string ActivityState { get; set; } = "Idle";
+        public decimal SocPercent { get; set; }
+        public bool IsCharging { get; set; }
+        public bool IsLoaded { get; set; }
+    }
+
+    private sealed record VehicleStatePayload(
+        int VehicleId, string SerialNumber, string ActivityState,
+        decimal SocPercent, bool IsCharging, bool IsLoaded,
+        string CurrentOrderId);
+
+    private sealed record MissionCounterPayload(
+        int Enqueued, int Dispatched, int Completed);
+
+    private sealed record VehiclePositionPayload(
+        int VehicleId, string SerialNumber,
+        decimal X, decimal Y, string NodeId);
+}

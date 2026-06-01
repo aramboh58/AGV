@@ -1,0 +1,30 @@
+@page "/"
+@namespace AGV.Dashboard.Pages
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AGV Fleet Control — NYT College Point</title>
+    <base href="~/" />
+    <link rel="stylesheet" href="/css/dashboard.css" />
+</head>
+<body>
+    <!-- SVG map lives outside Blazor — won't be wiped by re-renders -->
+    <div id="map-host" style="position:fixed; left:0; top:56px; right:300px; bottom:0;">
+        <svg id="fleet-map" viewBox="0 0 1400 420"
+             xmlns="http://www.w3.org/2000/svg"
+             preserveAspectRatio="xMidYMid meet"
+             style="width:100%;height:100%">
+            <g id="edges-layer"></g>
+            <g id="nodes-layer"></g>
+            <g id="vehicles-layer"></g>
+        </svg>
+    </div>
+
+    <component type="typeof(AGV.Dashboard.Components.App)" render-mode="ServerPrerendered" />
+    <script src="_framework/blazor.server.js"></script>
+    <script src="/js/fleet-map.js"></script>
+</body>
+</html>

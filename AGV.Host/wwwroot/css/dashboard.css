@@ -1,0 +1,394 @@
+/* ----------------------------------------------------------------
+   AGV Fleet Dashboard — Industrial Dark Theme
+   Fonts: Rajdhani (display) + JetBrains Mono (data)
+   ---------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── Variables ─────────────────────────────────────────────────── */
+:root {
+    --bg-base:        #0a0c0f;
+    --bg-panel:       #10141a;
+    --bg-card:        #161c24;
+    --bg-card-hover:  #1c2330;
+    --border:         #1e2738;
+    --border-bright:  #2a3448;
+
+    --text-primary:   #e2e8f0;
+    --text-secondary: #7a8ba0;
+    --text-dim:       #3d4f63;
+
+    --accent-blue:    #3b82f6;
+    --accent-cyan:    #06b6d4;
+    --accent-green:   #22c55e;
+    --accent-yellow:  #eab308;
+    --accent-orange:  #f97316;
+    --accent-red:     #ef4444;
+
+    /* Vehicle state colors */
+    --state-idle:       #334155;
+    --state-traveling:  #1e40af;
+    --state-loaded:     #065f46;
+    --state-forking:    #92400e;
+    --state-charging:   #4c1d95;
+
+    --state-idle-fg:      #94a3b8;
+    --state-traveling-fg: #60a5fa;
+    --state-loaded-fg:    #34d399;
+    --state-forking-fg:   #fbbf24;
+    --state-charging-fg:  #a78bfa;
+
+    /* Map colors */
+    --map-bg:           #0d1117;
+    --map-edge:         #1e3a5f;
+    --map-edge-bright:  #2a5280;
+    --map-node:         #1e3a5f;
+    --map-node-stroke:  #3b82f6;
+    --map-press-stand:  #1a3a2a;
+    --map-charge-node:  #2d1b69;
+
+    --font-display: 'Rajdhani', sans-serif;
+    --font-mono:    'JetBrains Mono', monospace;
+}
+
+/* ── Reset ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+    height: 100%;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-display);
+    font-size: 14px;
+    overflow: hidden;
+}
+
+/* ── Dashboard Layout ───────────────────────────────────────────── */
+.dashboard {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--bg-base);
+}
+
+/* ── Header ─────────────────────────────────────────────────────── */
+.dash-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    height: 56px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-bright);
+    flex-shrink: 0;
+}
+
+.dash-title {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.dash-title-main {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--text-primary);
+}
+
+.dash-title-sub {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.dash-header-stats {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.stat-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    min-width: 80px;
+}
+
+.stat-chip.online  { border-color: var(--accent-green); }
+.stat-chip.offline { border-color: var(--accent-red); }
+
+.stat-chip.online .stat-dot::before {
+    content: '●';
+    color: var(--accent-green);
+    margin-right: 4px;
+    font-size: 8px;
+    animation: pulse 1.5s infinite;
+}
+
+.stat-chip.offline .stat-dot::before {
+    content: '●';
+    color: var(--accent-red);
+    margin-right: 4px;
+    font-size: 8px;
+}
+
+.stat-label {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.stat-value {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.04em;
+}
+
+.stat-value.mono { font-family: var(--font-mono); }
+
+/* ── Body ────────────────────────────────────────────────────────── */
+.dash-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 0;
+}
+
+/* ── Map Panel ───────────────────────────────────────────────────── */
+.map-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+    padding: 12px;
+    gap: 8px;
+}
+
+.panel-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--text-dim);
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.map-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--map-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+#fleet-map {
+    width: 100%;
+    height: 100%;
+}
+
+/* ── Right Panel ─────────────────────────────────────────────────── */
+.right-panel {
+    width: 300px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-panel);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+/* ── Counter Panel ───────────────────────────────────────────────── */
+.counter-panel {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.counters {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.counter {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    gap: 4px;
+}
+
+.counter.accent {
+    border-color: var(--accent-cyan);
+    background: #0a1929;
+}
+
+.counter-value {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1;
+}
+
+.counter.accent .counter-value { color: var(--accent-cyan); }
+
+.counter-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--text-secondary);
+}
+
+/* ── Vehicle Panel ───────────────────────────────────────────────── */
+.vehicle-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    overflow: hidden;
+}
+
+.vehicle-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-top: 10px;
+    overflow-y: auto;
+}
+
+/* ── Vehicle Card ────────────────────────────────────────────────── */
+.vehicle-card {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    transition: background 0.2s ease;
+}
+
+.vehicle-card.state-idle      { border-color: var(--state-idle); }
+.vehicle-card.state-traveling { border-color: var(--state-traveling);
+                                 background: #0c1628; }
+.vehicle-card.state-loaded    { border-color: var(--state-loaded);
+                                 background: #061410; }
+.vehicle-card.state-forking   { border-color: var(--state-forking);
+                                 background: #150e00; }
+.vehicle-card.state-charging  { border-color: var(--state-charging);
+                                 background: #0e0a1e; }
+
+.vc-id {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-primary);
+    letter-spacing: 0.04em;
+}
+
+.vc-state {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.state-idle      .vc-state { color: var(--state-idle-fg); }
+.state-traveling .vc-state { color: var(--state-traveling-fg); }
+.state-loaded    .vc-state { color: var(--state-loaded-fg); }
+.state-forking   .vc-state { color: var(--state-forking-fg); }
+.state-charging  .vc-state { color: var(--state-charging-fg); }
+
+.vc-soc {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.soc-bar {
+    flex: 1;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.soc-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+}
+
+.soc-ok       { background: var(--accent-green); }
+.soc-low      { background: var(--accent-yellow); }
+.soc-critical { background: var(--accent-red); animation: pulse 1s infinite; }
+
+.soc-label {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    color: var(--text-secondary);
+    min-width: 24px;
+    text-align: right;
+}
+
+/* ── Map SVG Styles ─────────────────────────────────────────────── */
+.map-edge         { stroke: var(--map-edge); stroke-width: 1.5; fill: none; }
+.map-edge-cross   { stroke: var(--map-edge-bright); stroke-width: 2; fill: none; }
+.map-node         { fill: var(--map-node); stroke: var(--map-node-stroke);
+                    stroke-width: 1; r: 3; }
+.map-node-press   { fill: var(--map-press-stand); stroke: var(--accent-green);
+                    stroke-width: 1.5; r: 4; }
+.map-node-charge  { fill: var(--map-charge-node); stroke: var(--accent-cyan);
+                    stroke-width: 1.5; r: 4; }
+.map-node-staging { fill: #1a2a1a; stroke: var(--accent-yellow);
+                    stroke-width: 1.5; r: 4; }
+
+/* Vehicle dots */
+.vehicle-dot {
+    r: 6;
+    stroke-width: 1.5;
+    transition: cx 0.8s ease, cy 0.8s ease;
+    filter: drop-shadow(0 0 3px currentColor);
+}
+
+.vehicle-dot.state-idle      { fill: var(--state-idle-fg);
+                                stroke: var(--state-idle-fg); }
+.vehicle-dot.state-traveling { fill: var(--state-traveling-fg);
+                                stroke: var(--state-traveling-fg); }
+.vehicle-dot.state-loaded    { fill: var(--state-loaded-fg);
+                                stroke: var(--state-loaded-fg); }
+.vehicle-dot.state-forking   { fill: var(--state-forking-fg);
+                                stroke: var(--state-forking-fg); }
+.vehicle-dot.state-charging  { fill: var(--state-charging-fg);
+                                stroke: var(--state-charging-fg); }
+
+.vehicle-label {
+    font-family: var(--font-mono);
+    font-size: 7px;
+    fill: var(--text-primary);
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
+}
+
+/* ── Animations ─────────────────────────────────────────────────── */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+}

@@ -1,0 +1,2510 @@
+{
+  "nodes": [
+    {
+      "nodeId": 1,
+      "nodeName": "LO_01",
+      "x": 14997.13536,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 2,
+      "nodeName": "LO_02",
+      "x": 15017.0388,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 3,
+      "nodeName": "LO_03",
+      "x": 15681.0456,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 4,
+      "nodeName": "LO_04",
+      "x": 16075.4568,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 5,
+      "nodeName": "LO_05",
+      "x": 16739.4636,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 6,
+      "nodeName": "LO_06",
+      "x": 16914.78456,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 7,
+      "nodeName": "LO_07",
+      "x": 17578.79136,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 8,
+      "nodeName": "LO_08",
+      "x": 17973.20256,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 9,
+      "nodeName": "LO_09",
+      "x": 18637.20936,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 10,
+      "nodeName": "LO_10",
+      "x": 18812.53032,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 11,
+      "nodeName": "LO_11",
+      "x": 19476.53712,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 12,
+      "nodeName": "LO_12",
+      "x": 19870.94832,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 13,
+      "nodeName": "LO_13",
+      "x": 20534.95512,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 14,
+      "nodeName": "LO_14",
+      "x": 20554.88904,
+      "y": 15383.98752,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 15,
+      "nodeName": "LI_01",
+      "x": 14997.13536,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 16,
+      "nodeName": "LI_02",
+      "x": 15017.0388,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 17,
+      "nodeName": "LI_03",
+      "x": 15681.0456,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 18,
+      "nodeName": "LI_04",
+      "x": 16075.4568,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 19,
+      "nodeName": "LI_05",
+      "x": 16739.4636,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 20,
+      "nodeName": "LI_06",
+      "x": 16914.78456,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 21,
+      "nodeName": "LI_07",
+      "x": 17578.79136,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 22,
+      "nodeName": "LI_08",
+      "x": 17973.20256,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 23,
+      "nodeName": "LI_09",
+      "x": 18637.20936,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 24,
+      "nodeName": "LI_10",
+      "x": 18812.53032,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 25,
+      "nodeName": "LI_11",
+      "x": 19476.53712,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 26,
+      "nodeName": "LI_12",
+      "x": 19870.94832,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 27,
+      "nodeName": "LI_13",
+      "x": 20534.95512,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 28,
+      "nodeName": "LI_14",
+      "x": 20554.88904,
+      "y": 15514.04568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 29,
+      "nodeName": "UO_01",
+      "x": 14997.13536,
+      "y": 15802.02072,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 30,
+      "nodeName": "UO_02",
+      "x": 15017.0388,
+      "y": 15802.02072,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 31,
+      "nodeName": "UO_03",
+      "x": 15681.0456,
+      "y": 15802.02072,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 32,
+      "nodeName": "UO_04",
+      "x": 16075.4568,
+      "y": 15802.02072,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 33,
+      "nodeName": "UO_05",
+      "x": 16739.4636,
+      "y": 15802.02072,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 34,
+      "nodeName": "UO_06",
+      "x": 16914.78456,
+      "y": 15802.02072,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 35,
+      "nodeName": "UO_07",
+      "x": 17578.79136,
+      "y": 15802.02072,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 36,
+      "nodeName": "UO_08",
+      "x": 17973.20256,
+      "y": 15802.02072,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 37,
+      "nodeName": "UO_09",
+      "x": 18637.20936,
+      "y": 15802.02072,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 38,
+      "nodeName": "UI_01",
+      "x": 14997.13536,
+      "y": 15932.0484,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 39,
+      "nodeName": "UI_02",
+      "x": 15017.0388,
+      "y": 15932.0484,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 40,
+      "nodeName": "UI_03",
+      "x": 15681.0456,
+      "y": 15932.0484,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 41,
+      "nodeName": "UI_04",
+      "x": 16075.4568,
+      "y": 15932.0484,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 42,
+      "nodeName": "UI_05",
+      "x": 16739.4636,
+      "y": 15932.0484,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 43,
+      "nodeName": "UI_06",
+      "x": 16914.78456,
+      "y": 15932.0484,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 44,
+      "nodeName": "UI_07",
+      "x": 17578.79136,
+      "y": 15932.0484,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 45,
+      "nodeName": "UI_08",
+      "x": 17973.20256,
+      "y": 15932.0484,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 46,
+      "nodeName": "UI_09",
+      "x": 18637.20936,
+      "y": 15932.0484,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 47,
+      "nodeName": "LPS01A",
+      "x": 15052.66992,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 48,
+      "nodeName": "LPS01D",
+      "x": 15191.994,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 49,
+      "nodeName": "LPS02A",
+      "x": 15269.4132,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 50,
+      "nodeName": "LPS02D",
+      "x": 15408.76776,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 51,
+      "nodeName": "LPS03A",
+      "x": 15486.15648,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 52,
+      "nodeName": "LPS03D",
+      "x": 15625.51104,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 53,
+      "nodeName": "LPS04A",
+      "x": 16130.99136,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 54,
+      "nodeName": "LPS04D",
+      "x": 16270.34592,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 55,
+      "nodeName": "LPS05A",
+      "x": 16347.76512,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 56,
+      "nodeName": "LPS05D",
+      "x": 16487.0892,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 57,
+      "nodeName": "LPS06A",
+      "x": 16564.5084,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 58,
+      "nodeName": "LPS06D",
+      "x": 16703.86296,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 59,
+      "nodeName": "LPS07A",
+      "x": 16950.41568,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 60,
+      "nodeName": "LPS07D",
+      "x": 17089.73976,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 61,
+      "nodeName": "LPS08A",
+      "x": 17167.15896,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 62,
+      "nodeName": "LPS08D",
+      "x": 17306.48304,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 63,
+      "nodeName": "LPS09A",
+      "x": 17383.90224,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 64,
+      "nodeName": "LPS09D",
+      "x": 17523.2568,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 65,
+      "nodeName": "LPS10A",
+      "x": 18028.73712,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 66,
+      "nodeName": "LPS10D",
+      "x": 18168.09168,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 67,
+      "nodeName": "LPS11A",
+      "x": 18245.51088,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 68,
+      "nodeName": "LPS11D",
+      "x": 18384.83496,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 69,
+      "nodeName": "LPS12A",
+      "x": 18462.25416,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 70,
+      "nodeName": "LPS12D",
+      "x": 18601.57824,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 71,
+      "nodeName": "LPS13A",
+      "x": 18848.16144,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 72,
+      "nodeName": "LPS13D",
+      "x": 18987.48552,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 73,
+      "nodeName": "LPS14A",
+      "x": 19064.90472,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 74,
+      "nodeName": "LPS14D",
+      "x": 19204.2288,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 75,
+      "nodeName": "LPS15A",
+      "x": 19281.648,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 76,
+      "nodeName": "LPS15D",
+      "x": 19421.00256,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 77,
+      "nodeName": "LPS16A",
+      "x": 19926.48288,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 78,
+      "nodeName": "LPS16D",
+      "x": 20065.83744,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 79,
+      "nodeName": "LPS17A",
+      "x": 20143.22616,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 80,
+      "nodeName": "LPS17D",
+      "x": 20282.58072,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 81,
+      "nodeName": "LPS18A",
+      "x": 20359.99992,
+      "y": 15476.79912,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 82,
+      "nodeName": "LPS18D",
+      "x": 20499.324,
+      "y": 15421.0512,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 83,
+      "nodeName": "UPS01A",
+      "x": 15191.994,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 84,
+      "nodeName": "UPS01D",
+      "x": 15052.66992,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 85,
+      "nodeName": "UPS02A",
+      "x": 15408.76776,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 86,
+      "nodeName": "UPS02D",
+      "x": 15269.4132,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 87,
+      "nodeName": "UPS03A",
+      "x": 15625.51104,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 88,
+      "nodeName": "UPS03D",
+      "x": 15486.15648,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 89,
+      "nodeName": "UPS04A",
+      "x": 16270.34592,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 90,
+      "nodeName": "UPS04D",
+      "x": 16130.99136,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 91,
+      "nodeName": "UPS05A",
+      "x": 16487.0892,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 92,
+      "nodeName": "UPS05D",
+      "x": 16347.76512,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 93,
+      "nodeName": "UPS06A",
+      "x": 16703.86296,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 94,
+      "nodeName": "UPS06D",
+      "x": 16564.5084,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 95,
+      "nodeName": "UPS07A",
+      "x": 17089.73976,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 96,
+      "nodeName": "UPS07D",
+      "x": 16950.41568,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 97,
+      "nodeName": "UPS08A",
+      "x": 17306.48304,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 98,
+      "nodeName": "UPS08D",
+      "x": 17167.15896,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 99,
+      "nodeName": "UPS09A",
+      "x": 17523.2568,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 100,
+      "nodeName": "UPS09D",
+      "x": 17383.90224,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 101,
+      "nodeName": "UPS10A",
+      "x": 18168.09168,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 102,
+      "nodeName": "UPS10D",
+      "x": 18028.73712,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 103,
+      "nodeName": "UPS11A",
+      "x": 18384.83496,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 104,
+      "nodeName": "UPS11D",
+      "x": 18245.51088,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 105,
+      "nodeName": "UPS12A",
+      "x": 18601.57824,
+      "y": 15894.98472,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 106,
+      "nodeName": "UPS12D",
+      "x": 18462.25416,
+      "y": 15839.26728,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 107,
+      "nodeName": "LC01",
+      "x": 15027.2496,
+      "y": 15527.7312,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 108,
+      "nodeName": "LC02",
+      "x": 15456.1032,
+      "y": 15527.7312,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 109,
+      "nodeName": "LC03",
+      "x": 16500.348,
+      "y": 15527.7312,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 110,
+      "nodeName": "LC04",
+      "x": 16924.9344,
+      "y": 15527.7312,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 111,
+      "nodeName": "LC05",
+      "x": 17353.788,
+      "y": 15527.7312,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 112,
+      "nodeName": "LC06",
+      "x": 18398.0328,
+      "y": 15527.7312,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 113,
+      "nodeName": "LC07",
+      "x": 18823.8384,
+      "y": 15527.7312,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 114,
+      "nodeName": "LC08",
+      "x": 19252.692,
+      "y": 15527.7312,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 115,
+      "nodeName": "LC09",
+      "x": 20296.9368,
+      "y": 15527.7312,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 116,
+      "nodeName": "UC01",
+      "x": 15027.2496,
+      "y": 15945.612,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 117,
+      "nodeName": "UC02",
+      "x": 15456.1032,
+      "y": 15945.612,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 118,
+      "nodeName": "UC03",
+      "x": 16500.348,
+      "y": 15945.612,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 119,
+      "nodeName": "UC04",
+      "x": 16924.9344,
+      "y": 15945.612,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 120,
+      "nodeName": "UC05",
+      "x": 17353.788,
+      "y": 15945.612,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 121,
+      "nodeName": "UC06",
+      "x": 18398.0328,
+      "y": 15945.612,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 122,
+      "nodeName": "STG01",
+      "x": 15004.3896,
+      "y": 14949.8304,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 123,
+      "nodeName": "STG02",
+      "x": 15177.516,
+      "y": 14951.3544,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 124,
+      "nodeName": "STG03",
+      "x": 15350.9472,
+      "y": 14949.8304,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 125,
+      "nodeName": "MC01",
+      "x": 19078.194,
+      "y": 16115.05032,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 126,
+      "nodeName": "MC02",
+      "x": 19161.06912,
+      "y": 16114.95888,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 127,
+      "nodeName": "MC03",
+      "x": 19346.8752,
+      "y": 16114.95888,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 128,
+      "nodeName": "MC04",
+      "x": 19598.4876,
+      "y": 16114.9284,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 129,
+      "nodeName": "MC05",
+      "x": 19727.02176,
+      "y": 16114.95888,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 130,
+      "nodeName": "MC06",
+      "x": 19934.40768,
+      "y": 16114.95888,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 131,
+      "nodeName": "MC07",
+      "x": 19128.97368,
+      "y": 16189.7568,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 132,
+      "nodeName": "MC08",
+      "x": 19326.42312,
+      "y": 16189.66536,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 133,
+      "nodeName": "MC09",
+      "x": 19512.2292,
+      "y": 16189.66536,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 134,
+      "nodeName": "MC10",
+      "x": 19706.5392,
+      "y": 16189.66536,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 135,
+      "nodeName": "MC11",
+      "x": 19892.37576,
+      "y": 16189.66536,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    },
+    {
+      "nodeId": 136,
+      "nodeName": "MC12",
+      "x": 19985.18736,
+      "y": 16189.66536,
+      "nodeType": "StopNode",
+      "mapId": "NYT_COLLEGE_POINT_V1"
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": 1,
+      "startNodeId": 1,
+      "endNodeId": 2,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 2,
+      "startNodeId": 2,
+      "endNodeId": 3,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 3,
+      "startNodeId": 3,
+      "endNodeId": 4,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 4,
+      "startNodeId": 4,
+      "endNodeId": 5,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 5,
+      "startNodeId": 5,
+      "endNodeId": 6,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 6,
+      "startNodeId": 6,
+      "endNodeId": 7,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 7,
+      "startNodeId": 7,
+      "endNodeId": 8,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 8,
+      "startNodeId": 8,
+      "endNodeId": 9,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 9,
+      "startNodeId": 9,
+      "endNodeId": 10,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 10,
+      "startNodeId": 10,
+      "endNodeId": 11,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 11,
+      "startNodeId": 11,
+      "endNodeId": 12,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 12,
+      "startNodeId": 12,
+      "endNodeId": 13,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 13,
+      "startNodeId": 13,
+      "endNodeId": 14,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 14,
+      "startNodeId": 28,
+      "endNodeId": 27,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 15,
+      "startNodeId": 27,
+      "endNodeId": 26,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 16,
+      "startNodeId": 26,
+      "endNodeId": 25,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 17,
+      "startNodeId": 25,
+      "endNodeId": 24,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 18,
+      "startNodeId": 24,
+      "endNodeId": 23,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 19,
+      "startNodeId": 23,
+      "endNodeId": 22,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 20,
+      "startNodeId": 22,
+      "endNodeId": 21,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 21,
+      "startNodeId": 21,
+      "endNodeId": 20,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 22,
+      "startNodeId": 20,
+      "endNodeId": 19,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 23,
+      "startNodeId": 19,
+      "endNodeId": 18,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 24,
+      "startNodeId": 18,
+      "endNodeId": 17,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 25,
+      "startNodeId": 17,
+      "endNodeId": 16,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 26,
+      "startNodeId": 16,
+      "endNodeId": 15,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 27,
+      "startNodeId": 29,
+      "endNodeId": 30,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 28,
+      "startNodeId": 30,
+      "endNodeId": 31,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 29,
+      "startNodeId": 31,
+      "endNodeId": 32,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 30,
+      "startNodeId": 32,
+      "endNodeId": 33,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 31,
+      "startNodeId": 33,
+      "endNodeId": 34,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 32,
+      "startNodeId": 34,
+      "endNodeId": 35,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 33,
+      "startNodeId": 35,
+      "endNodeId": 36,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 34,
+      "startNodeId": 36,
+      "endNodeId": 37,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 35,
+      "startNodeId": 46,
+      "endNodeId": 45,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 36,
+      "startNodeId": 45,
+      "endNodeId": 44,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 37,
+      "startNodeId": 44,
+      "endNodeId": 43,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 38,
+      "startNodeId": 43,
+      "endNodeId": 42,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 39,
+      "startNodeId": 42,
+      "endNodeId": 41,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 40,
+      "startNodeId": 41,
+      "endNodeId": 40,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 41,
+      "startNodeId": 40,
+      "endNodeId": 39,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 42,
+      "startNodeId": 39,
+      "endNodeId": 38,
+      "speed": 1.2
+    },
+    {
+      "edgeId": 43,
+      "startNodeId": 1,
+      "endNodeId": 29,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 44,
+      "startNodeId": 29,
+      "endNodeId": 1,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 45,
+      "startNodeId": 15,
+      "endNodeId": 38,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 46,
+      "startNodeId": 38,
+      "endNodeId": 15,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 47,
+      "startNodeId": 2,
+      "endNodeId": 30,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 48,
+      "startNodeId": 30,
+      "endNodeId": 2,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 49,
+      "startNodeId": 16,
+      "endNodeId": 39,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 50,
+      "startNodeId": 39,
+      "endNodeId": 16,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 51,
+      "startNodeId": 3,
+      "endNodeId": 31,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 52,
+      "startNodeId": 31,
+      "endNodeId": 3,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 53,
+      "startNodeId": 17,
+      "endNodeId": 40,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 54,
+      "startNodeId": 40,
+      "endNodeId": 17,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 55,
+      "startNodeId": 4,
+      "endNodeId": 32,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 56,
+      "startNodeId": 32,
+      "endNodeId": 4,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 57,
+      "startNodeId": 18,
+      "endNodeId": 41,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 58,
+      "startNodeId": 41,
+      "endNodeId": 18,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 59,
+      "startNodeId": 5,
+      "endNodeId": 33,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 60,
+      "startNodeId": 33,
+      "endNodeId": 5,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 61,
+      "startNodeId": 19,
+      "endNodeId": 42,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 62,
+      "startNodeId": 42,
+      "endNodeId": 19,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 63,
+      "startNodeId": 6,
+      "endNodeId": 34,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 64,
+      "startNodeId": 34,
+      "endNodeId": 6,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 65,
+      "startNodeId": 20,
+      "endNodeId": 43,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 66,
+      "startNodeId": 43,
+      "endNodeId": 20,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 67,
+      "startNodeId": 7,
+      "endNodeId": 35,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 68,
+      "startNodeId": 35,
+      "endNodeId": 7,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 69,
+      "startNodeId": 21,
+      "endNodeId": 44,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 70,
+      "startNodeId": 44,
+      "endNodeId": 21,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 71,
+      "startNodeId": 8,
+      "endNodeId": 36,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 72,
+      "startNodeId": 36,
+      "endNodeId": 8,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 73,
+      "startNodeId": 22,
+      "endNodeId": 45,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 74,
+      "startNodeId": 45,
+      "endNodeId": 22,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 75,
+      "startNodeId": 9,
+      "endNodeId": 37,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 76,
+      "startNodeId": 37,
+      "endNodeId": 9,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 77,
+      "startNodeId": 23,
+      "endNodeId": 46,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 78,
+      "startNodeId": 46,
+      "endNodeId": 23,
+      "speed": 0.8
+    },
+    {
+      "edgeId": 79,
+      "startNodeId": 16,
+      "endNodeId": 47,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 80,
+      "startNodeId": 47,
+      "endNodeId": 48,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 81,
+      "startNodeId": 48,
+      "endNodeId": 2,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 82,
+      "startNodeId": 16,
+      "endNodeId": 49,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 83,
+      "startNodeId": 49,
+      "endNodeId": 50,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 84,
+      "startNodeId": 50,
+      "endNodeId": 3,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 85,
+      "startNodeId": 17,
+      "endNodeId": 51,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 86,
+      "startNodeId": 51,
+      "endNodeId": 52,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 87,
+      "startNodeId": 52,
+      "endNodeId": 3,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 88,
+      "startNodeId": 18,
+      "endNodeId": 53,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 89,
+      "startNodeId": 53,
+      "endNodeId": 54,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 90,
+      "startNodeId": 54,
+      "endNodeId": 4,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 91,
+      "startNodeId": 18,
+      "endNodeId": 55,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 92,
+      "startNodeId": 55,
+      "endNodeId": 56,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 93,
+      "startNodeId": 56,
+      "endNodeId": 5,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 94,
+      "startNodeId": 19,
+      "endNodeId": 57,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 95,
+      "startNodeId": 57,
+      "endNodeId": 58,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 96,
+      "startNodeId": 58,
+      "endNodeId": 5,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 97,
+      "startNodeId": 20,
+      "endNodeId": 59,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 98,
+      "startNodeId": 59,
+      "endNodeId": 60,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 99,
+      "startNodeId": 60,
+      "endNodeId": 6,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 100,
+      "startNodeId": 20,
+      "endNodeId": 61,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 101,
+      "startNodeId": 61,
+      "endNodeId": 62,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 102,
+      "startNodeId": 62,
+      "endNodeId": 7,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 103,
+      "startNodeId": 21,
+      "endNodeId": 63,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 104,
+      "startNodeId": 63,
+      "endNodeId": 64,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 105,
+      "startNodeId": 64,
+      "endNodeId": 7,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 106,
+      "startNodeId": 22,
+      "endNodeId": 65,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 107,
+      "startNodeId": 65,
+      "endNodeId": 66,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 108,
+      "startNodeId": 66,
+      "endNodeId": 8,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 109,
+      "startNodeId": 22,
+      "endNodeId": 67,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 110,
+      "startNodeId": 67,
+      "endNodeId": 68,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 111,
+      "startNodeId": 68,
+      "endNodeId": 9,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 112,
+      "startNodeId": 23,
+      "endNodeId": 69,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 113,
+      "startNodeId": 69,
+      "endNodeId": 70,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 114,
+      "startNodeId": 70,
+      "endNodeId": 9,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 115,
+      "startNodeId": 24,
+      "endNodeId": 71,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 116,
+      "startNodeId": 71,
+      "endNodeId": 72,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 117,
+      "startNodeId": 72,
+      "endNodeId": 10,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 118,
+      "startNodeId": 24,
+      "endNodeId": 73,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 119,
+      "startNodeId": 73,
+      "endNodeId": 74,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 120,
+      "startNodeId": 74,
+      "endNodeId": 11,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 121,
+      "startNodeId": 25,
+      "endNodeId": 75,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 122,
+      "startNodeId": 75,
+      "endNodeId": 76,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 123,
+      "startNodeId": 76,
+      "endNodeId": 11,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 124,
+      "startNodeId": 26,
+      "endNodeId": 77,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 125,
+      "startNodeId": 77,
+      "endNodeId": 78,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 126,
+      "startNodeId": 78,
+      "endNodeId": 12,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 127,
+      "startNodeId": 26,
+      "endNodeId": 79,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 128,
+      "startNodeId": 79,
+      "endNodeId": 80,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 129,
+      "startNodeId": 80,
+      "endNodeId": 13,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 130,
+      "startNodeId": 27,
+      "endNodeId": 81,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 131,
+      "startNodeId": 81,
+      "endNodeId": 82,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 132,
+      "startNodeId": 82,
+      "endNodeId": 13,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 133,
+      "startNodeId": 39,
+      "endNodeId": 83,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 134,
+      "startNodeId": 83,
+      "endNodeId": 84,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 135,
+      "startNodeId": 84,
+      "endNodeId": 30,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 136,
+      "startNodeId": 40,
+      "endNodeId": 85,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 137,
+      "startNodeId": 85,
+      "endNodeId": 86,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 138,
+      "startNodeId": 86,
+      "endNodeId": 30,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 139,
+      "startNodeId": 40,
+      "endNodeId": 87,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 140,
+      "startNodeId": 87,
+      "endNodeId": 88,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 141,
+      "startNodeId": 88,
+      "endNodeId": 31,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 142,
+      "startNodeId": 41,
+      "endNodeId": 89,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 143,
+      "startNodeId": 89,
+      "endNodeId": 90,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 144,
+      "startNodeId": 90,
+      "endNodeId": 32,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 145,
+      "startNodeId": 42,
+      "endNodeId": 91,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 146,
+      "startNodeId": 91,
+      "endNodeId": 92,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 147,
+      "startNodeId": 92,
+      "endNodeId": 32,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 148,
+      "startNodeId": 42,
+      "endNodeId": 93,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 149,
+      "startNodeId": 93,
+      "endNodeId": 94,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 150,
+      "startNodeId": 94,
+      "endNodeId": 33,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 151,
+      "startNodeId": 43,
+      "endNodeId": 95,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 152,
+      "startNodeId": 95,
+      "endNodeId": 96,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 153,
+      "startNodeId": 96,
+      "endNodeId": 34,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 154,
+      "startNodeId": 44,
+      "endNodeId": 97,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 155,
+      "startNodeId": 97,
+      "endNodeId": 98,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 156,
+      "startNodeId": 98,
+      "endNodeId": 34,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 157,
+      "startNodeId": 44,
+      "endNodeId": 99,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 158,
+      "startNodeId": 99,
+      "endNodeId": 100,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 159,
+      "startNodeId": 100,
+      "endNodeId": 35,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 160,
+      "startNodeId": 45,
+      "endNodeId": 101,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 161,
+      "startNodeId": 101,
+      "endNodeId": 102,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 162,
+      "startNodeId": 102,
+      "endNodeId": 36,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 163,
+      "startNodeId": 46,
+      "endNodeId": 103,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 164,
+      "startNodeId": 103,
+      "endNodeId": 104,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 165,
+      "startNodeId": 104,
+      "endNodeId": 36,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 166,
+      "startNodeId": 46,
+      "endNodeId": 105,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 167,
+      "startNodeId": 105,
+      "endNodeId": 106,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 168,
+      "startNodeId": 106,
+      "endNodeId": 37,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 169,
+      "startNodeId": 16,
+      "endNodeId": 107,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 170,
+      "startNodeId": 107,
+      "endNodeId": 15,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 171,
+      "startNodeId": 17,
+      "endNodeId": 108,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 172,
+      "startNodeId": 108,
+      "endNodeId": 16,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 173,
+      "startNodeId": 19,
+      "endNodeId": 109,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 174,
+      "startNodeId": 109,
+      "endNodeId": 18,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 175,
+      "startNodeId": 20,
+      "endNodeId": 110,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 176,
+      "startNodeId": 110,
+      "endNodeId": 19,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 177,
+      "startNodeId": 21,
+      "endNodeId": 111,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 178,
+      "startNodeId": 111,
+      "endNodeId": 20,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 179,
+      "startNodeId": 23,
+      "endNodeId": 112,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 180,
+      "startNodeId": 112,
+      "endNodeId": 22,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 181,
+      "startNodeId": 24,
+      "endNodeId": 113,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 182,
+      "startNodeId": 113,
+      "endNodeId": 23,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 183,
+      "startNodeId": 25,
+      "endNodeId": 114,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 184,
+      "startNodeId": 114,
+      "endNodeId": 24,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 185,
+      "startNodeId": 27,
+      "endNodeId": 115,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 186,
+      "startNodeId": 115,
+      "endNodeId": 26,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 187,
+      "startNodeId": 39,
+      "endNodeId": 116,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 188,
+      "startNodeId": 116,
+      "endNodeId": 38,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 189,
+      "startNodeId": 40,
+      "endNodeId": 117,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 190,
+      "startNodeId": 117,
+      "endNodeId": 39,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 191,
+      "startNodeId": 42,
+      "endNodeId": 118,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 192,
+      "startNodeId": 118,
+      "endNodeId": 41,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 193,
+      "startNodeId": 43,
+      "endNodeId": 119,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 194,
+      "startNodeId": 119,
+      "endNodeId": 42,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 195,
+      "startNodeId": 44,
+      "endNodeId": 120,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 196,
+      "startNodeId": 120,
+      "endNodeId": 43,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 197,
+      "startNodeId": 46,
+      "endNodeId": 121,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 198,
+      "startNodeId": 121,
+      "endNodeId": 45,
+      "speed": 0.24
+    },
+    {
+      "edgeId": 199,
+      "startNodeId": 122,
+      "endNodeId": 1,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 200,
+      "startNodeId": 15,
+      "endNodeId": 122,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 201,
+      "startNodeId": 123,
+      "endNodeId": 1,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 202,
+      "startNodeId": 15,
+      "endNodeId": 123,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 203,
+      "startNodeId": 124,
+      "endNodeId": 1,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 204,
+      "startNodeId": 15,
+      "endNodeId": 124,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 205,
+      "startNodeId": 27,
+      "endNodeId": 125,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 206,
+      "startNodeId": 125,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 207,
+      "startNodeId": 27,
+      "endNodeId": 126,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 208,
+      "startNodeId": 126,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 209,
+      "startNodeId": 27,
+      "endNodeId": 127,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 210,
+      "startNodeId": 127,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 211,
+      "startNodeId": 27,
+      "endNodeId": 128,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 212,
+      "startNodeId": 128,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 213,
+      "startNodeId": 27,
+      "endNodeId": 129,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 214,
+      "startNodeId": 129,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 215,
+      "startNodeId": 27,
+      "endNodeId": 130,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 216,
+      "startNodeId": 130,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 217,
+      "startNodeId": 27,
+      "endNodeId": 131,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 218,
+      "startNodeId": 131,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 219,
+      "startNodeId": 27,
+      "endNodeId": 132,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 220,
+      "startNodeId": 132,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 221,
+      "startNodeId": 27,
+      "endNodeId": 133,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 222,
+      "startNodeId": 133,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 223,
+      "startNodeId": 27,
+      "endNodeId": 134,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 224,
+      "startNodeId": 134,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 225,
+      "startNodeId": 27,
+      "endNodeId": 135,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 226,
+      "startNodeId": 135,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 227,
+      "startNodeId": 27,
+      "endNodeId": 136,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 228,
+      "startNodeId": 136,
+      "endNodeId": 27,
+      "speed": 0.4
+    },
+    {
+      "edgeId": 229,
+      "startNodeId": 14,
+      "endNodeId": 28,
+      "speed": 0.64
+    },
+    {
+      "edgeId": 230,
+      "startNodeId": 15,
+      "endNodeId": 1,
+      "speed": 0.64
+    },
+    {
+      "edgeId": 231,
+      "startNodeId": 37,
+      "endNodeId": 46,
+      "speed": 0.64
+    },
+    {
+      "edgeId": 232,
+      "startNodeId": 38,
+      "endNodeId": 29,
+      "speed": 0.64
+    },
+    {
+      "edgeId": 233,
+      "startNodeId": 1,
+      "endNodeId": 29,
+      "speed": 0.64
+    },
+    {
+      "edgeId": 234,
+      "startNodeId": 38,
+      "endNodeId": 15,
+      "speed": 0.64
+    },
+    {
+      "edgeId": 235,
+      "startNodeId": 5,
+      "endNodeId": 33,
+      "speed": 0.64
+    },
+    {
+      "edgeId": 236,
+      "startNodeId": 42,
+      "endNodeId": 19,
+      "speed": 0.64
+    }
+  ]
+}

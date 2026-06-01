@@ -8,6 +8,8 @@ using AGV.Routing.Services;
 using AGV.Simulation.Services;
 using AGV.Topology.Services;
 using AGV.Vehicle.Services;
+using AGV.Dashboard.Hubs;
+using AGV.Dashboard.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
@@ -23,7 +25,7 @@ try
 {
     Log.Information("AGV Host Control System starting...");
 
-    var builder = Host.CreateApplicationBuilder(args);
+    var builder = WebApplication.CreateBuilder(args);
 
     // ----------------------------------------------------------------
     // Serilog
@@ -167,6 +169,20 @@ try
         NullExternalSystemAdapter>();
 
     // ----------------------------------------------------------------
+    // ASP.NET Core / SignalR / Blazor
+    // ----------------------------------------------------------------
+    builder.Services.AddRazorPages();
+    builder.Services.AddServerSideBlazor();
+    builder.Services.AddSignalR();
+
+    // ----------------------------------------------------------------
+    // Dashboard broadcaster
+    // ----------------------------------------------------------------
+    builder.Services.AddSingleton<AGV.Dashboard.Services.DashboardBroadcaster>();
+    builder.Services.AddHostedService(sp =>
+        sp.GetRequiredService<AGV.Dashboard.Services.DashboardBroadcaster>());
+
+    // ----------------------------------------------------------------
     // Vehicle interface — Simulation or Mqtt
     // ----------------------------------------------------------------
     var vehicleInterface = builder.Configuration
@@ -226,16 +242,22 @@ try
     // ----------------------------------------------------------------
     // Build and run
     // ----------------------------------------------------------------
-    var host = builder.Build();
+    var app = builder.Build();
+
+    app.UseStaticFiles();
+    app.UseRouting();
+    app.MapBlazorHub();
+    app.MapHub<AGV.Dashboard.Hubs.FleetHub>("/fleethub");
+    app.MapFallbackToPage("/_Host");
 
     // Apply database migrations at startup
     await DatabaseProviderRegistration
-        .ApplyMigrationsAsync(host.Services);
+        .ApplyMigrationsAsync(app.Services);
 
     Log.Information("AGV Host Control System started successfully");
 
     // Seed topology if empty
-    using (var scope = host.Services.CreateScope())
+    using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider
             .GetRequiredService<AGV.Persistence.Data.AgvDbContext>();
@@ -259,11 +281,11 @@ try
     }
 
     // Load vehicles from database into VehicleRegistry
-    using (var scope = host.Services.CreateScope())
+    using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider
             .GetRequiredService<AGV.Persistence.Data.AgvDbContext>();
-        var registry = host.Services
+        var registry = app.Services
             .GetRequiredService<AGV.Fleet.Infrastructure.VehicleRegistry>();
 
         var vehicles = await db.Set<AGV.Core.Entities.Vehicle>()
@@ -276,11 +298,11 @@ try
     }
 
     // Initialize charge slots from database node names
-    using (var scope = host.Services.CreateScope())
+    using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider
             .GetRequiredService<AGV.Persistence.Data.AgvDbContext>();
-        var chargeManager = host.Services
+        var chargeManager = app.Services
             .GetRequiredService<AGV.Fleet.Services.ChargeQueueManagerService>();
 
         var allNodes = await db.Set<AGV.Core.Entities.Node>()
@@ -308,16 +330,19 @@ try
     }
 
     // Wire press demand — load press stand node IDs and subscribe RollDemanded
-    using (var scope = host.Services.CreateScope())
+    using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider
             .GetRequiredService<AGV.Persistence.Data.AgvDbContext>();
-        var simOptions = host.Services
+        var simOptions = app.Services
             .GetRequiredService<SimulationOptions>();
-        var simEngine = host.Services
+        var simEngine = app.Services
             .GetRequiredService<SimulationEngineService>();
-        var fleetManager = host.Services
+        var fleetManager = app.Services
             .GetRequiredService<IFleetManager>();
+
+    //    await AGV.Tools.ExportRoadmapJson.ExportAsync(db,
+    //@"C:\Dev\AGV\AGV.Host\wwwroot\nyt_agv_roadmap.json");
 
         // Load press stand drop node IDs (LPS*A and UPS*A nodes)
         var pressStandNodeIds = await db.Set<AGV.Core.Entities.Node>()
@@ -399,7 +424,7 @@ try
             pressStandNodeIds.Count, stagingAssignmentIds.Count);
     }
 
-    await host.RunAsync();
+    await app.RunAsync();
 }
 catch (Exception ex)
 {
