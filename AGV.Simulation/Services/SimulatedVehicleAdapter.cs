@@ -90,6 +90,7 @@ namespace AGV.Simulation.Services
             state.NodeIndex = 0;
             state.TravelProgress = 0;
             state.StateMachine.TryTransition(ActivityState.TravelingToPickup);
+            state.StateMachine.SetOrderState(OrderState.Waiting);
 
             _logger.LogDebug(
                 "Simulated vehicle {Serial} received order {OrderId} " +
@@ -385,6 +386,7 @@ namespace AGV.Simulation.Services
 
                     state.StateMachine.TryTransition(
                         ActivityState.Dropping);
+                    state.StateMachine.SetOrderState(OrderState.Running);
                     state.ForkOperationTimer = 0m;
                 }
                 else
@@ -475,10 +477,13 @@ namespace AGV.Simulation.Services
                 }
                 else // Dropping
                 {
+                    state.StateMachine.SetOrderState(OrderState.Finished);
                     state.StateMachine.TryTransition(ActivityState.Idle);
+                    state.StateMachine.SetOrderState(OrderState.Idle);
                     state.PendingOrder = null;
                     state.CurrentOrderId = string.Empty;
                     state.NodeIndex = 0;
+
                 }
             }
 

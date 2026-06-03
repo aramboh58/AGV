@@ -34,6 +34,7 @@ namespace AGV.Dashboard.Services
         private TimeSpan _simTime = TimeSpan.Zero;
         private decimal _speedFactor = 60m;
         private int _tickCount;
+        private DateTime _simStartTime = DateTime.UtcNow;
 
         public DashboardBroadcaster(
             ChannelRegistry channels,
@@ -119,6 +120,14 @@ namespace AGV.Dashboard.Services
                     else if (update.OrderState == OrderState.Finished)
                         Interlocked.Increment(ref _completed);
 
+                    if (update.OrderState == OrderState.Waiting)
+                    {
+                        Interlocked.Increment(ref _dispatched);
+                        Interlocked.Increment(ref _enqueued); // ← add this
+                    }
+
+                    _logger.LogInformation("OrderState: {OrderState}", update.OrderState);
+
                     var dto = new VehicleStateDto(
                         update.VehicleId,
                         update.SerialNumber,
@@ -160,6 +169,10 @@ namespace AGV.Dashboard.Services
                         "UpdateMissionCounters", counterDto, ct);
 
                     // Add this:
+                    var elapsed = DateTime.UtcNow - _simStartTime;
+                    var simElapsed = TimeSpan.FromSeconds(elapsed.TotalSeconds * (double)_speedFactor);
+                    _simTime = simElapsed;
+
                     await _hub.Clients.All.SendAsync(
                         "UpdateSimClock", new SimClockDto(
                             _simTime.ToString(@"hh\:mm\:ss"),

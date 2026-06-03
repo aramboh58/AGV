@@ -19,11 +19,11 @@
         <div class="dash-header-stats">
             <div class="stat-chip">
                 <span class="stat-label">SIM TIME</span>
-                <span class="stat-value mono" id="sim-time">00:00:00</span>
+                <span class="stat-value mono">@_simTime</span>
             </div>
             <div class="stat-chip">
                 <span class="stat-label">SPEED</span>
-                <span class="stat-value mono">60×</span>
+                <span class="stat-value mono">@_speedFactor×</span>
             </div>
             <div class="stat-chip @(_hubConnected ? "online" : "offline")">
                 <span class="stat-dot"></span>
@@ -102,6 +102,10 @@
 
     private readonly Dictionary<int, VehicleDisplayState> _vehicleStates = new();
 
+    private string _simTime = "00:00:00";
+    private decimal _speedFactor = 60m;
+
+    private sealed record SimClockPayload(string SimTime, decimal SpeedFactor, int TickCount);
     // ----------------------------------------------------------------
     // Lifecycle
     // ----------------------------------------------------------------
@@ -156,6 +160,14 @@
             var y = (double)pos.Y;
             var nodeId = pos.NodeId;
             Task.Run(() => JS.InvokeVoidAsync("fleetMap.updatePosition", id, x, y, nodeId));
+        });
+
+        // Update the simulation clock
+        _hub.On<SimClockPayload>("UpdateSimClock", clock =>
+        {
+            _simTime = clock.SimTime;
+            _speedFactor = clock.SpeedFactor;
+            InvokeAsync(StateHasChanged);
         });
 
         _hub.Reconnected += _ =>
