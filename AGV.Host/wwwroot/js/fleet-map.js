@@ -56,7 +56,6 @@
     // Load roadmap and render
     // ----------------------------------------------------------------
     async function init() {
-        console.log('init called, svg exists:', !!document.getElementById('fleet-map'));
         if (init._done) return;
         init._done = true;
 
@@ -152,15 +151,12 @@
 
         /** Update vehicle position on the SVG map. */
         updatePosition: function (vehicleId, x, y, nodeId) {
-            console.log('updatePosition called', vehicleId, nodeId, 'vehicles:', Object.keys(vehicles));
             const v = vehicles[vehicleId];
-            console.log('vehicle lookup:', v);
             if (!v) return;
 
             let sx, sy;
 
             if (nodeId && nodePositions[nodeId]) {
-                console.log('updatePosition', vehicleId, nodeId);
                 sx = nodePositions[nodeId].x;
                 sy = nodePositions[nodeId].y;
             } else if (x != null && y != null) {

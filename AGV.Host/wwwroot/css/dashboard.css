@@ -363,7 +363,6 @@ html, body {
 .vehicle-dot {
     r: 6;
     stroke-width: 1.5;
-    transition: cx 0.8s ease, cy 0.8s ease;
     filter: drop-shadow(0 0 3px currentColor);
 }
 
