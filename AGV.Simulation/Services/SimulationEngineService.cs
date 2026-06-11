@@ -2,9 +2,12 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 using AGV.Core.Logging;
+using AGV.Core.Messages;
+using AGV.Fleet.Infrastructure;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -40,6 +43,7 @@ namespace AGV.Simulation.Services
         private readonly SimulatedVehicleAdapter _adapter;
         private readonly SimulationOptions _options;
         private readonly ILogger _logger;
+        private readonly ChannelRegistry _channels;
 
         // Simulation time tracking
         private decimal _simTimeSeconds;
@@ -53,11 +57,13 @@ namespace AGV.Simulation.Services
         public SimulationEngineService(
             SimulatedVehicleAdapter adapter,
             SimulationOptions options,
-            ILoggerFactory loggerFactory)
+            ILoggerFactory loggerFactory,
+            ChannelRegistry channels)
         {
             _adapter = adapter;
             _options = options;
             _logger = loggerFactory.CreateLogger(LogDomains.Fleet);
+            _channels = channels;
         }
 
         // ----------------------------------------------------------------
@@ -158,6 +164,16 @@ namespace AGV.Simulation.Services
             if (_options.EnablePressDemand)
             {
                 UpdatePressDemand(dt);
+            }
+
+            if (_tickCount % 60 == 0)
+            {
+                await _channels.SimClock.Writer.WriteAsync(
+                    new SimClockUpdate(
+                        SimTimeFormatted,
+                        (decimal)_options.SpeedFactor,
+                        _tickCount),
+                    cancellationToken);
             }
 
             // Periodic status log

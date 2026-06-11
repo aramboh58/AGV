@@ -391,11 +391,13 @@ namespace AGV.Simulation.Services
                 }
                 else
                 {
-                    state.StateMachine.TryTransition(
-                        ActivityState.Idle);
+                    state.StateMachine.SetOrderState(OrderState.Finished);
+                    state.StateMachine.TryTransition(ActivityState.Idle);
+                    await PublishStateUpdateAsync(state, cancellationToken);
+                    state.StateMachine.SetOrderState(OrderState.Idle);
                     state.PendingOrder = null;
+                    state.NodeIndex = 0;
                 }
-
                 return;
             }
 
@@ -479,6 +481,8 @@ namespace AGV.Simulation.Services
                 {
                     state.StateMachine.SetOrderState(OrderState.Finished);
                     state.StateMachine.TryTransition(ActivityState.Idle);
+                    // Publish the Finished state before resetting to Idle
+                    await PublishStateUpdateAsync(state, cancellationToken);
                     state.StateMachine.SetOrderState(OrderState.Idle);
                     state.PendingOrder = null;
                     state.CurrentOrderId = string.Empty;
@@ -512,6 +516,8 @@ namespace AGV.Simulation.Services
             };
 
             await _channels.VehicleStateUpdates.Writer
+                .WriteAsync(update, cancellationToken);
+            await _channels.DashboardStateUpdates.Writer
                 .WriteAsync(update, cancellationToken);
 
             // Publish position update for dashboard

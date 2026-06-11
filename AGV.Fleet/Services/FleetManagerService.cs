@@ -57,6 +57,8 @@ namespace AGV.Fleet.Services
         private int _transferredMissions;
         private int _swappedMissions;
 
+        private int _enqueuedMissions;
+        private int _dispatchedMissions;
         public FleetManagerService(
             VehicleRegistry registry,
             MissionQueueService missionQueue,
@@ -131,8 +133,12 @@ namespace AGV.Fleet.Services
             context = context with { MissionId = id };
 
             _missionQueue.Enqueue(context);
-
-            _dispatchSignal.Release(); // wake dispatch loop
+            Interlocked.Increment(ref _enqueuedMissions);
+            await _channels.MissionCounters.Writer.WriteAsync(
+                new MissionCounterUpdate(
+                    _enqueuedMissions, _dispatchedMissions, _completedMissions),
+                cancellationToken);
+            _dispatchSignal.Release(); // wakee dispatch loop
 
             _dispatchLogger.LogInformation(
                 "Mission {MissionId} enqueued " +
@@ -322,6 +328,11 @@ namespace AGV.Fleet.Services
 
                 // Assign mission to vehicle
                 vehicle.AssignMission(mission.MissionId);
+                Interlocked.Increment(ref _dispatchedMissions);
+                await _channels.MissionCounters.Writer.WriteAsync(
+                    new MissionCounterUpdate(
+                        _enqueuedMissions, _dispatchedMissions, _completedMissions),
+                    stoppingToken);
                 vehicle.UpdateState(
                     ActivityState.TravelingToPickup,
                     OrderState.Waiting);
@@ -384,8 +395,13 @@ namespace AGV.Fleet.Services
             // Don't downgrade from an active dispatch state
             if (update.ActivityState == ActivityState.Idle
                 && update.OrderState == OrderState.Idle
-                && vehicle.OrderState == OrderState.Waiting)
+                && vehicle.OrderState == OrderState.Waiting
+                && update.OrderState != OrderState.Finished)
             {
+                _logger.LogDebug(
+                    "Guard fired: Activity={Act} Order={Ord} VehicleOrder={VOrd}",
+                    update.ActivityState, update.OrderState, vehicle.OrderState);
+
                 return; // stale idle report — order is in-flight
             }
 
@@ -409,15 +425,23 @@ namespace AGV.Fleet.Services
             }
 
             // Mission completion detection
+            _logger.LogDebug(
+                "CompletionCheck: Vehicle={VehicleId} UpdateOrder={UOrd} MissionId={Mid}",
+                vehicle.VehicleId, update.OrderState, vehicle.CurrentMissionId);
+
+            // Mission completion detection
             if (update.OrderState == OrderState.Finished
                 && vehicle.CurrentMissionId.HasValue)
             {
                 vehicle.ClearMission();
                 Interlocked.Increment(ref _completedMissions);
                 _dispatchLogger.LogInformation(
-                    "Vehicle {VehicleId} completed mission — " +
-                    "total completed: {Total}",
+                    "Vehicle {VehicleId} completed mission — total completed: {Total}",
                     vehicle.VehicleId, _completedMissions);
+                await _channels.MissionCounters.Writer.WriteAsync(
+                    new MissionCounterUpdate(
+                        _enqueuedMissions, _dispatchedMissions, _completedMissions),
+                    stoppingToken);
             }
 
             await Task.CompletedTask;

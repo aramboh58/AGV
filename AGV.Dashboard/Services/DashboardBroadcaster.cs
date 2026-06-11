@@ -56,7 +56,8 @@ namespace AGV.Dashboard.Services
             await Task.WhenAll(
                 BroadcastPositionsAsync(stoppingToken),
                 BroadcastStatesAsync(stoppingToken),
-                BroadcastMissionCountersAsync(stoppingToken));
+                BroadcastMissionCountersAsync(stoppingToken),
+                BroadcastSimClockAsync(stoppingToken));
         }
 
         // ----------------------------------------------------------------
@@ -110,22 +111,10 @@ namespace AGV.Dashboard.Services
             CancellationToken ct)
         {
             await foreach (var update in
-                _channels.VehicleStateUpdates.Reader.ReadAllAsync(ct))
+                _channels.DashboardStateUpdates.Reader.ReadAllAsync(ct))
             {
                 try
                 {
-                    // Track mission counters from state transitions
-                    if (update.OrderState == OrderState.Waiting)
-                        Interlocked.Increment(ref _dispatched);
-                    else if (update.OrderState == OrderState.Finished)
-                        Interlocked.Increment(ref _completed);
-
-                    if (update.OrderState == OrderState.Waiting)
-                    {
-                        Interlocked.Increment(ref _dispatched);
-                        Interlocked.Increment(ref _enqueued); // ← add this
-                    }
-
                     _logger.LogInformation("OrderState: {OrderState}", update.OrderState);
 
                     var dto = new VehicleStateDto(
@@ -153,38 +142,15 @@ namespace AGV.Dashboard.Services
         // Mission counters — throttled to 1/sec to avoid flooding
         // ----------------------------------------------------------------
 
-        private async Task BroadcastMissionCountersAsync(
-            CancellationToken ct)
+        private async Task BroadcastMissionCountersAsync(CancellationToken ct)
         {
-            while (!ct.IsCancellationRequested)
+            await foreach (var update in
+                _channels.MissionCounters.Reader.ReadAllAsync(ct))
             {
-                try
-                {
-                    await Task.Delay(1000, ct);
-
-                    var counterDto = new MissionCounterDto(
-                        _enqueued, _dispatched, _completed);
-
-                    await _hub.Clients.All.SendAsync(
-                        "UpdateMissionCounters", counterDto, ct);
-
-                    // Add this:
-                    var elapsed = DateTime.UtcNow - _simStartTime;
-                    var simElapsed = TimeSpan.FromSeconds(elapsed.TotalSeconds * (double)_speedFactor);
-                    _simTime = simElapsed;
-
-                    await _hub.Clients.All.SendAsync(
-                        "UpdateSimClock", new SimClockDto(
-                            _simTime.ToString(@"hh\:mm\:ss"),
-                            _speedFactor,
-                            _tickCount), ct);
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex,
-                        "Error broadcasting mission counters");
-                }
+                await _hub.Clients.All.SendAsync(
+                    "UpdateMissionCounters",
+                    new { update.Enqueued, update.Dispatched, update.Completed },
+                    ct);
             }
         }
 
@@ -199,6 +165,17 @@ namespace AGV.Dashboard.Services
             _tickCount = tickCount;
             _speedFactor = speedFactor;
             Interlocked.Add(ref _enqueued, enqueuedDelta);
+        }
+        private async Task BroadcastSimClockAsync(CancellationToken ct)
+        {
+            await foreach (var update in
+                _channels.SimClock.Reader.ReadAllAsync(ct))
+            {
+                await _hub.Clients.All.SendAsync(
+                    "UpdateSimClock",
+                    new { update.SimTime, update.SpeedFactor, update.TickCount },
+                    ct);
+            }
         }
     }
 }

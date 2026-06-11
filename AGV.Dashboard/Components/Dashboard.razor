@@ -105,7 +105,7 @@
     private string _simTime = "00:00:00";
     private decimal _speedFactor = 60m;
 
-    private sealed record SimClockPayload(string SimTime, decimal SpeedFactor, int TickCount);
+    private sealed record SimClockPayload(string SimTime, decimal SpeedFactor, long TickCount);
     // ----------------------------------------------------------------
     // Lifecycle
     // ----------------------------------------------------------------

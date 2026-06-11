@@ -1,4 +1,7 @@
 @page "/"
+@using Microsoft.Extensions.Options
+@using AGV.Dashboard.Options
+@inject IOptions<DashboardOptions> DashboardOpts
 @namespace AGV.Dashboard.Pages
 @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
 <!DOCTYPE html>
@@ -9,6 +12,13 @@
     <title>AGV Fleet Control — NYT College Point</title>
     <base href="~/" />
     <link rel="stylesheet" href="/css/dashboard.css" />
+    <script>
+        window.dashboardConfig = {
+            crossCorridorMoveIds: @Html.Raw(
+                System.Text.Json.JsonSerializer.Serialize(
+                DashboardOpts.Value.Map.CrossCorridorMoveIds))
+            };
+    </script>
 </head>
 <body>
     <!-- SVG map lives outside Blazor — won't be wiped by re-renders -->

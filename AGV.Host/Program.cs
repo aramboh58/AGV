@@ -13,6 +13,7 @@ using AGV.Dashboard.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
+using AGV.Dashboard.Options;
 
 // ----------------------------------------------------------------
 // Bootstrap Serilog early so startup errors are captured
@@ -62,6 +63,9 @@ try
 
     builder.Services.Configure<BatteryModelOptions>(
         builder.Configuration.GetSection(BatteryModelOptions.SectionName));
+
+    builder.Services.Configure<DashboardOptions>(
+        builder.Configuration.GetSection(DashboardOptions.SectionName));
 
     builder.Services.AddOptions<AGV.Core.Interfaces.ChargingThresholds>()
         .Bind(builder.Configuration.GetSection("ChargingThresholds"));

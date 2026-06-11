@@ -16,4 +16,8 @@
     <ProjectReference Include="..\AGV.Grpc\AGV.Grpc.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Options\" />
+  </ItemGroup>
+
 </Project>

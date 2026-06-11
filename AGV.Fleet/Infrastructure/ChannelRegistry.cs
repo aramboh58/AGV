@@ -180,6 +180,13 @@ namespace AGV.Fleet.Infrastructure
                     SingleReader = true,
                     SingleWriter = false
                 });
+
+        public Channel<VehicleStateUpdate> DashboardStateUpdates { get; } =
+            Channel.CreateUnbounded<VehicleStateUpdate>();
+        public Channel<MissionCounterUpdate> MissionCounters { get; } =
+            Channel.CreateUnbounded<MissionCounterUpdate>();
+        public Channel<SimClockUpdate> SimClock { get; } =
+            Channel.CreateUnbounded<SimClockUpdate>();
     }
 
     /// <summary>

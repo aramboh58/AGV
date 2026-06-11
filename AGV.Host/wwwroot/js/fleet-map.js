@@ -82,6 +82,10 @@
             nodePositions[node.nodeId] = { x: sx, y: sy };
         }
 
+        const crossIds = (window.dashboardConfig && window.dashboardConfig.crossCorridorMoveIds)
+            ? new Set(window.dashboardConfig.crossCorridorMoveIds)
+            : new Set();
+
         // ── Render edges ────────────────────────────────────────────
         for (const edge of roadmap.edges) {
             const from = nodePositions[edge.startNodeId];
@@ -96,7 +100,7 @@
             line.setAttribute('y2', to.y);
 
             // Cross-corridor connections get a brighter style
-            const isCross = false;
+            const isCross = crossIds.has(edge.edgeId);
             line.setAttribute('class', isCross ? 'map-edge-cross' : 'map-edge');
             edgesLayer.appendChild(line);
         }
