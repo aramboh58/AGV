@@ -381,6 +381,18 @@ namespace AGV.Fleet.Services
                 .WriteAsync(true, cancellationToken);
         }
 
+        public IReadOnlyList<int> GetBlockedVehicleIds()
+        {
+            lock (_trafficLock)
+            {
+                return _contentionTicks.Keys
+                    .Select(k => k.Item1)
+                    .Distinct()
+                    .ToList()
+                    .AsReadOnly();
+            }
+        }
+
         // ----------------------------------------------------------------
         // Deadlock detection
         // ----------------------------------------------------------------
@@ -426,6 +438,13 @@ namespace AGV.Fleet.Services
                         PrimaryVehicleId = circular[0],
                         InvolvedVehicleIds = circular,
                     });
+
+                _ = _channels.Alerts.Writer.TryWrite(
+                    new AlertUpdate(
+                        AlertType.Deadlock,
+                        circular[0],
+                        $"Deadlock detected: {string.Join(" → ", circular.Select(v => $"V{v}"))}",
+                        DateTime.UtcNow));
 
                 // Resolve via escape node detour
                 ResolveDeadlock(circular, cancellationToken);

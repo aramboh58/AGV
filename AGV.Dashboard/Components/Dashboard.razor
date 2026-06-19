@@ -51,6 +51,7 @@
                     <div class="counter">
                         <span class="counter-value" id="cnt-enqueued">@_enqueued</span>
                         <span class="counter-label">ENQUEUED</span>
+                        <span class="counter-sublabel">▸ @_queueDepth in queue</span>
                     </div>
                     <div class="counter">
                         <span class="counter-value" id="cnt-dispatched">@_dispatched</span>
@@ -84,6 +85,19 @@
                 </div>
             </section>
 
+            @if (_alerts.Count > 0)
+            {
+                <section class="alert-panel">
+                    <div class="panel-label">ALERTS</div>
+                    @foreach (var a in _alerts.OrderByDescending(x => x.Timestamp))
+                    {
+                        <div class="alert-row @GetAlertClass(a.Type)">
+                            <span class="alert-icon">@GetAlertIcon(a.Type)</span>
+                            <span class="alert-msg">@a.Message</span>
+                        </div>
+                    }
+                </section>
+            }
         </aside>
     </div>
 </div>
@@ -99,6 +113,7 @@
     private int _enqueued;
     private int _dispatched;
     private int _completed;
+    private int _queueDepth;
 
     private readonly Dictionary<int, VehicleDisplayState> _vehicleStates = new();
 
@@ -146,10 +161,11 @@
 
         _hub.On<MissionCounterPayload>("UpdateMissionCounters", counters =>
         {
-            _enqueued   = counters.Enqueued;
-            _dispatched = counters.Dispatched;
-            _completed  = counters.Completed;
-            InvokeAsync(StateHasChanged);
+        _enqueued = counters.Enqueued;
+        _dispatched = counters.Dispatched;
+        _completed = counters.Completed;
+        _queueDepth = counters.QueueDepth;
+        InvokeAsync(StateHasChanged);
         });
 
         // Position updates go straight to JS for smooth SVG animation
@@ -167,6 +183,14 @@
         {
             _simTime = clock.SimTime;
             _speedFactor = clock.SpeedFactor;
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hub.On<AlertBatchPayload>("UpdateAlerts", batch =>
+        {
+            _alerts.Clear();
+            foreach (var a in batch.Alerts)
+                _alerts.Add(a);
             InvokeAsync(StateHasChanged);
         });
 
@@ -234,6 +258,22 @@
         soc < 25m ? "soc-critical" :
         soc < 50m ? "soc-low" : "soc-ok";
 
+    private static string GetAlertClass(string type) => type switch
+    {
+        "LowBattery" => "alert-warning",
+        "VehicleBlocked" => "alert-caution",
+        "Deadlock" => "alert-critical",
+        _ => "alert-warning"
+    };
+
+    private static string GetAlertIcon(string type) => type switch
+    {
+        "LowBattery" => "⚡",
+        "VehicleBlocked" => "⛔",
+        "Deadlock" => "🔴",
+        _ => "⚠"
+    };
+
     // ----------------------------------------------------------------
     // Dispose
     // ----------------------------------------------------------------
@@ -264,9 +304,17 @@
         string CurrentOrderId);
 
     private sealed record MissionCounterPayload(
-        int Enqueued, int Dispatched, int Completed);
+        int Enqueued, int Dispatched, int Completed, int QueueDepth);
 
     private sealed record VehiclePositionPayload(
         int VehicleId, string SerialNumber,
         decimal X, decimal Y, string NodeId);
+    
+    private sealed record AlertPayload(
+        string Type, int VehicleId,
+        string Message, DateTime Timestamp);
+
+    private sealed record AlertBatchPayload(List<AlertPayload> Alerts);
+
+    private readonly List<AlertPayload> _alerts = new();
 }

@@ -136,7 +136,8 @@ namespace AGV.Fleet.Services
             Interlocked.Increment(ref _enqueuedMissions);
             await _channels.MissionCounters.Writer.WriteAsync(
                 new MissionCounterUpdate(
-                    _enqueuedMissions, _dispatchedMissions, _completedMissions),
+                    _enqueuedMissions, _dispatchedMissions, _completedMissions,
+                    _missionQueue.Count),
                 cancellationToken);
             _dispatchSignal.Release(); // wakee dispatch loop
 
@@ -331,7 +332,8 @@ namespace AGV.Fleet.Services
                 Interlocked.Increment(ref _dispatchedMissions);
                 await _channels.MissionCounters.Writer.WriteAsync(
                     new MissionCounterUpdate(
-                        _enqueuedMissions, _dispatchedMissions, _completedMissions),
+                        _enqueuedMissions, _dispatchedMissions, _completedMissions,
+                        _missionQueue.Count),
                     stoppingToken);
                 vehicle.UpdateState(
                     ActivityState.TravelingToPickup,
@@ -440,7 +442,8 @@ namespace AGV.Fleet.Services
                     vehicle.VehicleId, _completedMissions);
                 await _channels.MissionCounters.Writer.WriteAsync(
                     new MissionCounterUpdate(
-                        _enqueuedMissions, _dispatchedMissions, _completedMissions),
+                        _enqueuedMissions, _dispatchedMissions, _completedMissions,
+                        _missionQueue.Count),
                     stoppingToken);
             }
 

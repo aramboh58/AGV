@@ -177,8 +177,13 @@ try
     // ----------------------------------------------------------------
     builder.Services.AddRazorPages();
     builder.Services.AddServerSideBlazor();
-    builder.Services.AddSignalR();
-
+    builder.Services.AddSignalR()
+        .AddJsonProtocol(options =>
+        {
+            options.PayloadSerializerOptions.Converters
+                .Add(new System.Text.Json.Serialization
+                    .JsonStringEnumConverter());
+        });
     // ----------------------------------------------------------------
     // Dashboard broadcaster
     // ----------------------------------------------------------------

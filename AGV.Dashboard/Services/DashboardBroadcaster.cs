@@ -1,10 +1,13 @@
 using AGV.Core.Enums;
+using AGV.Core.Logging;
 using AGV.Core.Messages;
 using AGV.Dashboard.Hubs;
 using AGV.Fleet.Infrastructure;
+using AGV.Fleet.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32;
 
 namespace AGV.Dashboard.Services
 {
@@ -23,7 +26,9 @@ namespace AGV.Dashboard.Services
     {
         private readonly ChannelRegistry _channels;
         private readonly IHubContext<FleetHub> _hub;
-        private readonly ILogger<DashboardBroadcaster> _logger;
+        private readonly ILogger _logger;
+        private readonly VehicleRegistry _registry;
+        private readonly TrafficManagerService _traffic;
 
         // Mission counters — incremented by reading the dispatch channel
         private int _enqueued;
@@ -37,13 +42,17 @@ namespace AGV.Dashboard.Services
         private DateTime _simStartTime = DateTime.UtcNow;
 
         public DashboardBroadcaster(
-            ChannelRegistry channels,
             IHubContext<FleetHub> hub,
-            ILogger<DashboardBroadcaster> logger)
+            ChannelRegistry channels,
+            VehicleRegistry registry,
+            TrafficManagerService traffic,
+            ILoggerFactory loggerFactory)
         {
-            _channels = channels;
             _hub = hub;
-            _logger = logger;
+            _channels = channels;
+            _registry = registry;
+            _traffic = traffic;
+            _logger = loggerFactory.CreateLogger(LogDomains.Dashboard);
         }
 
         protected override async Task ExecuteAsync(
@@ -54,10 +63,11 @@ namespace AGV.Dashboard.Services
 
             // Run position, state, and mission broadcast loops concurrently
             await Task.WhenAll(
-                BroadcastPositionsAsync(stoppingToken),
-                BroadcastStatesAsync(stoppingToken),
-                BroadcastMissionCountersAsync(stoppingToken),
-                BroadcastSimClockAsync(stoppingToken));
+               BroadcastPositionsAsync(stoppingToken),
+               BroadcastStatesAsync(stoppingToken),
+               BroadcastMissionCountersAsync(stoppingToken),
+               BroadcastSimClockAsync(stoppingToken),
+               BroadcastAlertsAsync(stoppingToken));
         }
 
         // ----------------------------------------------------------------
@@ -176,6 +186,62 @@ namespace AGV.Dashboard.Services
                     new { update.SimTime, update.SpeedFactor, update.TickCount },
                     ct);
             }
+        }
+        private async Task BroadcastAlertsAsync(CancellationToken ct)
+        {
+            var drainTask = Task.Run(async () =>
+            {
+                await foreach (var alert in
+                    _channels.Alerts.Reader.ReadAllAsync(ct))
+                {
+                    await _hub.Clients.All.SendAsync(
+                        "UpdateAlerts",
+                        new
+                        {
+                            alert.Type,
+                            alert.VehicleId,
+                            alert.Message,
+                            alert.Timestamp
+                        },
+                        ct);
+                }
+            }, ct);
+
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(2000, ct);
+
+                var alerts = new List<AlertUpdate>();
+
+                foreach (var v in _registry.GetAll())
+                {
+                    if (v.BatteryStateOfCharge < 30m)
+                        alerts.Add(new AlertUpdate(
+                            AlertType.LowBattery,
+                            v.VehicleId,
+                            $"F{v.VehicleId:D2} low battery: {v.BatteryStateOfCharge:F0}%",
+                            DateTime.UtcNow));
+                }
+
+                foreach (var vid in _traffic.GetBlockedVehicleIds())
+                {
+                    alerts.Add(new AlertUpdate(
+                        AlertType.VehicleBlocked,
+                        vid,
+                        $"F{vid:D2} blocked waiting for node",
+                        DateTime.UtcNow));
+                }
+
+                if (alerts.Count > 0)
+                {
+                    await _hub.Clients.All.SendAsync(
+                        "UpdateAlerts",
+                        new { Alerts = alerts },
+                        ct);
+                }
+            }
+
+            await drainTask;
         }
     }
 }

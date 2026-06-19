@@ -54,6 +54,6 @@ namespace AGV.Core.Messages
         public DateTime ReceivedAt { get; init; } = DateTime.UtcNow;
     }
 
-    public record MissionCounterUpdate(int Enqueued, int Dispatched, int Completed);
+    public record MissionCounterUpdate(int Enqueued, int Dispatched, int Completed, int QueueDepth);
     public record SimClockUpdate(string SimTime, decimal SpeedFactor, long TickCount);
 }
