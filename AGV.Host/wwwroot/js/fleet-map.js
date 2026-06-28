@@ -190,6 +190,9 @@
 
         /** Update vehicle state (changes dot color). */
         updateState: function (vehicleId, activityState) {
+            const labelColor = stateLabelColor(activityState);
+            v.label.setAttribute('fill', labelColor);
+
             const v = vehicles[vehicleId];
             if (!v) return;
 
@@ -223,6 +226,13 @@
                 return 'state-charging';
             default:
                 return 'state-idle';
+        }
+    }
+
+    function stateLabelColor(state) {
+        switch (state) {
+            case 'Idle': return '#94a3b8';
+            default: return '#ffffff';
         }
     }
 

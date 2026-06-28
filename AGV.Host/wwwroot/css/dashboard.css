@@ -385,12 +385,18 @@ html, body {
 
 .vehicle-label {
     font-family: var(--font-mono);
-    font-size: 7px;
+    font-size: 13px;
     fill: var(--text-primary);
     text-anchor: middle;
     dominant-baseline: middle;
     pointer-events: none;
+    font-weight: 700;
+    paint-order: stroke;
+    stroke: var(--bg-base);
+    stroke-width: 5px;
+    stroke-linejoin: round;
 }
+
 .alert-panel {
     padding: 12px;
     border-top: 1px solid var(--border);
