@@ -30,6 +30,9 @@ namespace AGV.Dashboard.Services
         private readonly VehicleRegistry _registry;
         private readonly TrafficManagerService _traffic;
 
+        private readonly Dictionary<int, Queue<(DateTime Time, decimal Soc)>> _socHistory = new();
+        private const int SocHistoryMaxPoints = 15;
+
         // Mission counters — incremented by reading the dispatch channel
         private int _enqueued;
         private int _dispatched;
@@ -125,6 +128,14 @@ namespace AGV.Dashboard.Services
             {
                 try
                 {
+                    if (!_socHistory.ContainsKey(update.VehicleId))
+                        _socHistory[update.VehicleId] = new Queue<(DateTime, decimal)>();
+
+                    var history = _socHistory[update.VehicleId];
+                    history.Enqueue((DateTime.UtcNow, update.BatteryStateOfCharge));
+                    if (history.Count > SocHistoryMaxPoints)
+                        history.Dequeue();
+                    
                     _logger.LogInformation("OrderState: {OrderState}", update.OrderState);
 
                     var dto = new VehicleStateDto(
@@ -242,6 +253,26 @@ namespace AGV.Dashboard.Services
             }
 
             await drainTask;
+        }
+        public VehicleDetailDto GetVehicleDetail(int vehicleId)
+        {
+            var vehicle = _registry.GetById(vehicleId);
+            if (vehicle is null) return null!;
+
+            _socHistory.TryGetValue(vehicleId, out var history);
+            var socPoints = history?.Select(h => h.Soc).ToList()
+                            ?? new List<decimal>();
+
+            return new VehicleDetailDto(
+                vehicle.VehicleId,
+                vehicle.SerialNumber,
+                vehicle.ActivityState.ToString(),
+                vehicle.BatteryStateOfCharge,
+                vehicle.IsLoaded,
+                vehicle.CurrentMissionId,
+                vehicle.PlannedRouteNodeIds.ToList(),
+                vehicle.CurrentNodeId,
+                socPoints);
         }
     }
 }

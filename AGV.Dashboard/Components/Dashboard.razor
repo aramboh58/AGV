@@ -39,6 +39,7 @@
         <section class="map-panel">
             <div class="panel-label">FLOOR MAP — NYT COLLEGE POINT</div>
             <div class="map-container" id="map-container-placeholder"></div>
+            
         </section>
 
         <!-- ── Right Panel ────────────────────────────────────── -->
@@ -99,6 +100,60 @@
                 </section>
             }
         </aside>
+
+        @if (_selectedVehicle is not null)
+        {
+            <div class="vehicle-popup">
+                <button class="popup-close">✕</button>
+
+                <div class="popup-title">F@(_selectedVehicle.VehicleId.ToString("D2"))</div>
+                <div class="popup-row">
+                    <span class="popup-label">STATE</span>
+                    <span class="popup-value">@_selectedVehicle.ActivityState</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">SOC</span>
+                    <span class="popup-value">@_selectedVehicle.SocPercent.ToString("F0")%</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">MISSION</span>
+                    <span class="popup-value">@(_selectedVehicle.CurrentMissionId?.ToString() ?? "—")</span>
+                </div>
+                <div class="popup-section-label">SOC HISTORY</div>
+                <div class="popup-chart">
+                    @{
+                        var max = _selectedVehicle.SocHistory.Any()
+                        ? (double)_selectedVehicle.SocHistory.Max() : 100;
+                        var min = _selectedVehicle.SocHistory.Any()
+                        ? (double)_selectedVehicle.SocHistory.Min() : 0;
+                        var range = Math.Max(max - min, 10);
+                    }
+                    <svg class="soc-sparkline" viewBox="0 0 150 40" preserveAspectRatio="none">
+                        @if (_selectedVehicle.SocHistory.Count > 1)
+                        {
+                            var points = _selectedVehicle.SocHistory
+                            .Select((s, i) =>
+                            {
+                                var x = i * 150.0 / (_selectedVehicle.SocHistory.Count - 1);
+                                var y = 40 - ((double)s - min) / range * 35;
+                                return $"{x:F1},{y:F1}";
+                            });
+                            <polyline points="@string.Join(" ", points)"
+                                      fill="none" stroke="#06b6d4" stroke-width="1.5" />
+                        }
+                    </svg>
+                </div>
+                <div class="popup-section-label">ROUTE</div>
+                <div class="popup-route">
+                    @foreach (var nodeId in _selectedVehicle.RouteNodeIds)
+                    {
+                        <span class="route-node @(nodeId == _selectedVehicle.CurrentNodeId ? "route-node-current" : "")">
+                            @nodeId
+                        </span>
+                    }
+                </div>
+            </div>
+        }
     </div>
 </div>
 
@@ -121,6 +176,10 @@
     private decimal _speedFactor = 60m;
 
     private sealed record SimClockPayload(string SimTime, decimal SpeedFactor, long TickCount);
+
+    private VehicleDetailPayload? _selectedVehicle;
+    private DotNetObjectReference<Dashboard>? _dotNetRef;
+
     // ----------------------------------------------------------------
     // Lifecycle
     // ----------------------------------------------------------------
@@ -194,6 +253,13 @@
             InvokeAsync(StateHasChanged);
         });
 
+        _hub.On<VehicleDetailPayload>("UpdateVehicleDetail", detail =>
+        {
+        //Console.WriteLine($"UpdateVehicleDetail received: V{detail.VehicleId}");
+        _selectedVehicle = detail;
+        InvokeAsync(StateHasChanged);
+        });
+
         _hub.Reconnected += _ =>
         {
             _hubConnected = true;
@@ -215,7 +281,9 @@
     {
         if (firstRender)
         {
+            _dotNetRef = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("fleetMap.init");
+            await JS.InvokeVoidAsync("fleetMap.setDotNetRef", _dotNetRef);
             _mapInitialized = true;
         }
     }
@@ -280,6 +348,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        _dotNetRef?.Dispose();
         if (_hub is not null)
             await _hub.DisposeAsync();
     }
@@ -316,5 +385,30 @@
 
     private sealed record AlertBatchPayload(List<AlertPayload> Alerts);
 
+    private sealed record VehicleDetailPayload(
+        int VehicleId,
+        string SerialNumber,
+        string ActivityState,
+        decimal SocPercent,
+        bool IsLoaded,
+        int? CurrentMissionId,
+        List<int> RouteNodeIds,
+        int? CurrentNodeId,
+        List<decimal> SocHistory);
     private readonly List<AlertPayload> _alerts = new();
+
+    [JSInvokable]
+    public async Task OnVehicleClicked(int vehicleId)
+    {
+        //Console.WriteLine($"OnVehicleClicked: {vehicleId}");
+        if (_hub is not null)
+            await _hub.SendAsync("RequestVehicleDetail", vehicleId);
+    }
+
+    [JSInvokable]
+    public void ClosePopup()
+    {
+        _selectedVehicle = null;
+        InvokeAsync(StateHasChanged);
+    }
 }

@@ -131,6 +131,8 @@ namespace AGV.Core.Entities
         /// Timestamp when this vehicle record was created.
         /// </summary>
         public DateTime CreatedAt { get; private set; }
+        public IReadOnlyList<int> PlannedRouteNodeIds { get; private set; }
+            = Array.Empty<int>();
 
         // Private constructor for EF Core
         private Vehicle()
@@ -225,12 +227,13 @@ namespace AGV.Core.Entities
         /// <summary>
         /// Assigns a mission to this vehicle.
         /// </summary>
-        public void AssignMission(int missionId)
+        public void AssignMission(int missionId, IReadOnlyList<int> routeNodeIds)
         {
             if (missionId <= 0)
                 throw new ArgumentOutOfRangeException(nameof(missionId),
                     "MissionId must be a positive integer.");
             CurrentMissionId = missionId;
+            PlannedRouteNodeIds = routeNodeIds;
             OrderState = OrderState.Waiting;
         }
 
@@ -241,6 +244,7 @@ namespace AGV.Core.Entities
         public void ClearMission()
         {
             CurrentMissionId = null;
+            PlannedRouteNodeIds = Array.Empty<int>();
             OrderState = OrderState.Idle;
             ActivityState = ActivityState.Idle;
             IsLoaded = false;

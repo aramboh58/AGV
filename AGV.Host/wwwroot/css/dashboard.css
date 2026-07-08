@@ -71,8 +71,27 @@ html, body {
     background: var(--bg-base);
 }
 
+.dash-body {
+    pointer-events: none;
+    position: relative;
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 0;
+}
+
+.right-panel {
+    pointer-events: all;
+    width: 300px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-panel);
+    overflow: hidden;
+    flex-shrink: 0;
+}
 /* ── Header ─────────────────────────────────────────────────────── */
 .dash-header {
+    pointer-events: all;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -154,20 +173,14 @@ html, body {
 
 .stat-value.mono { font-family: var(--font-mono); }
 
-/* ── Body ────────────────────────────────────────────────────────── */
-.dash-body {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-    gap: 0;
-}
-
 /* ── Map Panel ───────────────────────────────────────────────────── */
 .map-panel {
+    pointer-events: none;
+    position: relative;
     flex: 1;
     display: flex;
     flex-direction: column;
-    background: var(--bg-panel);
+    background: transparent;
     border-right: 1px solid var(--border);
     overflow: hidden;
     padding: 12px;
@@ -184,11 +197,13 @@ html, body {
 }
 
 .map-container {
+    pointer-events: none;
     flex: 1;
+    min-height: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--map-bg);
+    background: transparent;
     border: 1px solid var(--border);
     border-radius: 4px;
     overflow: hidden;
@@ -197,16 +212,7 @@ html, body {
 #fleet-map {
     width: 100%;
     height: 100%;
-}
-
-/* ── Right Panel ─────────────────────────────────────────────────── */
-.right-panel {
-    width: 300px;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-panel);
-    overflow: hidden;
-    flex-shrink: 0;
+    min-height: 300px;
 }
 
 /* ── Counter Panel ───────────────────────────────────────────────── */
@@ -367,6 +373,8 @@ html, body {
 
 /* Vehicle dots */
 .vehicle-dot {
+    pointer-events: all;
+    cursor: pointer;
     r: 6;
     stroke-width: 1.5;
     filter: drop-shadow(0 0 3px currentColor);
@@ -445,4 +453,119 @@ html, body {
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50%       { opacity: 0.4; }
+}
+
+.vehicle-popup {
+    pointer-events: all;
+    position: absolute;
+    top: 44px;
+    left: 12px;
+    width: 220px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    padding: 10px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.popup-close {
+    pointer-events: all;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 16px;
+    height: 16px;
+    font-size: 9px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+}
+
+    .popup-close:hover {
+        border-color: var(--accent-red);
+        color: var(--accent-red);
+    }
+
+.popup-title {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: 0.08em;
+}
+
+.popup-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.popup-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--text-secondary);
+}
+
+.popup-value {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-primary);
+}
+
+.popup-section-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+    padding-top: 4px;
+    margin-top: 2px;
+}
+
+.soc-sparkline {
+    width: 100%;
+    height: 40px;
+    display: block;
+}
+
+.popup-chart {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px;
+}
+
+.popup-route {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    max-height: 80px;
+    overflow-y: auto;
+}
+
+.route-node {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 1px 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-secondary);
+}
+
+.route-node-current {
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    background: #0a1929;
 }

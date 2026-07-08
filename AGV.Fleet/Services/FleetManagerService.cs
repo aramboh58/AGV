@@ -328,8 +328,12 @@ namespace AGV.Fleet.Services
                 }
 
                 // Assign mission to vehicle
-                vehicle.AssignMission(mission.MissionId);
+                vehicle.AssignMission(
+                    mission.MissionId,
+                    route.Nodes.Select(n => n.NodeId).ToList().AsReadOnly());
+
                 Interlocked.Increment(ref _dispatchedMissions);
+
                 await _channels.MissionCounters.Writer.WriteAsync(
                     new MissionCounterUpdate(
                         _enqueuedMissions, _dispatchedMissions, _completedMissions,

@@ -158,34 +158,59 @@
             const v = vehicles[vehicleId];
             if (!v) return;
 
-            let sx, sy;
+            let targetX, targetY;
 
             if (nodeId && nodePositions[nodeId]) {
-                sx = nodePositions[nodeId].x;
-                sy = nodePositions[nodeId].y;
+                targetX = nodePositions[nodeId].x;
+                targetY = nodePositions[nodeId].y;
             } else if (x != null && y != null) {
-                sx = toSvgX(parseFloat(x));
-                sy = toSvgY(parseFloat(y));
+                targetX = toSvgX(parseFloat(x));
+                targetY = toSvgY(parseFloat(y));
             } else {
                 return;
             }
 
-            // Suppress CSS transition on first position update
+            // First placement — no animation
             if (!v.positioned) {
-                v.dot.style.transition = 'none';
-                v.label.style.transition = 'none';
+                v.dot.setAttribute('cx', targetX);
+                v.dot.setAttribute('cy', targetY);
+                v.label.setAttribute('x', targetX);
+                v.label.setAttribute('y', targetY);
+                v.currentX = targetX;
+                v.currentY = targetY;
                 v.positioned = true;
-                // Re-enable transition after first placement
-                requestAnimationFrame(() => {
-                    v.dot.style.transition = '';
-                    v.label.style.transition = '';
-                });
+                return;
             }
 
-            v.dot.setAttribute('cx', sx);
-            v.dot.setAttribute('cy', sy);
-            v.label.setAttribute('x', sx);
-            v.label.setAttribute('y', sy);
+            // Cancel any existing animation
+            if (v.animFrame) cancelAnimationFrame(v.animFrame);
+
+            const startX = v.currentX;
+            const startY = v.currentY;
+            const duration = 1000; // 1 seconds in ms
+            const startTime = performance.now();
+
+            function animate(now) {
+                const elapsed = now - startTime;
+                const t = Math.min(elapsed / duration, 1);
+
+                const cx = startX + (targetX - startX) * t;
+                const cy = startY + (targetY - startY) * t;
+
+                v.dot.setAttribute('cx', cx);
+                v.dot.setAttribute('cy', cy);
+                v.label.setAttribute('x', cx);
+                v.label.setAttribute('y', cy);
+
+                v.currentX = cx;
+                v.currentY = cy;
+
+                if (t < 1) {
+                    v.animFrame = requestAnimationFrame(animate);
+                }
+            }
+
+            v.animFrame = requestAnimationFrame(animate);
         },
 
         /** Update vehicle state (changes dot color). */
@@ -201,6 +226,10 @@
                 v.dot.setAttribute('class', `vehicle-dot ${stateClass}`);
                 v.state = stateClass;
             }
+        },
+
+        setDotNetRef: function (dotNetRef) {
+            window.fleetMap._dotNetRef = dotNetRef;
         },
     };
 
@@ -236,13 +265,24 @@
         }
     }
 
-    // ----------------------------------------------------------------
-    // Boot
-    // ----------------------------------------------------------------
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
+    document.addEventListener('click', function (e) {
+        console.log('Click detected on:', e.target.tagName, e.target.className);
+        const target = e.target;
 
+        // Vehicle dot clicked
+        if (target.classList.contains('vehicle-dot')) {
+            const vid = parseInt(target.getAttribute('data-vid'));
+            console.log('Vehicle dot clicked:', vid);
+            if (window.fleetMap._dotNetRef)
+                window.fleetMap._dotNetRef.invokeMethodAsync('OnVehicleClicked', vid);
+            return;
+        }
+
+        // Close button clicked
+        if (target.classList.contains('popup-close')) {
+            if (window.fleetMap._dotNetRef)
+                window.fleetMap._dotNetRef.invokeMethodAsync('ClosePopup');
+            return;
+        }
+    });
 })();

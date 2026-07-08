@@ -1,3 +1,4 @@
+using AGV.Dashboard.Services;
 using Microsoft.AspNetCore.SignalR;
 
 namespace AGV.Dashboard.Hubs
@@ -9,12 +10,17 @@ namespace AGV.Dashboard.Hubs
     /// </summary>
     public sealed class FleetHub : Hub
     {
-        // No server-side methods needed for Phase 1 —
-        // all communication is server → client push.
-        // Client methods called by DashboardBroadcaster:
-        //   UpdateVehiclePosition(VehiclePositionDto)
-        //   UpdateVehicleState(VehicleStateDto)
-        //   UpdateMissionCounters(MissionCounterDto)
-        //   UpdateSimClock(SimClockDto)
+        private readonly DashboardBroadcaster _broadcaster;
+
+        public FleetHub(DashboardBroadcaster broadcaster)
+        {
+            _broadcaster = broadcaster;
+        }
+
+        public async Task RequestVehicleDetail(int vehicleId)
+        {
+            var detail = _broadcaster.GetVehicleDetail(vehicleId);
+            await Clients.Caller.SendAsync("UpdateVehicleDetail", detail);
+        }
     }
 }
