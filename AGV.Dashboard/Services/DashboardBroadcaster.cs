@@ -263,6 +263,10 @@ namespace AGV.Dashboard.Services
             var socPoints = history?.Select(h => h.Soc).ToList()
                             ?? new List<decimal>();
 
+            _logger.LogInformation(
+                "GetVehicleDetail: V{Id} SOC history points={Count}",
+                vehicleId, socPoints.Count);
+
             return new VehicleDetailDto(
                 vehicle.VehicleId,
                 vehicle.SerialNumber,

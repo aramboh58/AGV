@@ -122,11 +122,9 @@
                 <div class="popup-section-label">SOC HISTORY</div>
                 <div class="popup-chart">
                     @{
-                        var max = _selectedVehicle.SocHistory.Any()
-                        ? (double)_selectedVehicle.SocHistory.Max() : 100;
-                        var min = _selectedVehicle.SocHistory.Any()
-                        ? (double)_selectedVehicle.SocHistory.Min() : 0;
-                        var range = Math.Max(max - min, 10);
+                        var max = 100.0;
+                        var min = 0.0;
+                        var range = 100.0;
                     }
                     <svg class="soc-sparkline" viewBox="0 0 150 40" preserveAspectRatio="none">
                         @if (_selectedVehicle.SocHistory.Count > 1)
@@ -385,16 +383,18 @@
 
     private sealed record AlertBatchPayload(List<AlertPayload> Alerts);
 
-    private sealed record VehicleDetailPayload(
-        int VehicleId,
-        string SerialNumber,
-        string ActivityState,
-        decimal SocPercent,
-        bool IsLoaded,
-        int? CurrentMissionId,
-        List<int> RouteNodeIds,
-        int? CurrentNodeId,
-        List<decimal> SocHistory);
+    private sealed class VehicleDetailPayload
+    {
+        public int VehicleId { get; set; }
+        public string SerialNumber { get; set; } = "";
+        public string ActivityState { get; set; } = "";
+        public decimal SocPercent { get; set; }
+        public bool IsLoaded { get; set; }
+        public int? CurrentMissionId { get; set; }
+        public List<int> RouteNodeIds { get; set; } = new();
+        public int? CurrentNodeId { get; set; }
+        public List<decimal> SocHistory { get; set; } = new();
+    }
     private readonly List<AlertPayload> _alerts = new();
 
     [JSInvokable]

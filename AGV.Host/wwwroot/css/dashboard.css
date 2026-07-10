@@ -539,6 +539,11 @@ html, body {
     display: block;
 }
 
+.soc-sparkline polyline {
+    stroke: var(--accent-cyan);
+    stroke-width: 2;
+}
+
 .popup-chart {
     background: var(--bg-card);
     border: 1px solid var(--border);
