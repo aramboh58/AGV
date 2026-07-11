@@ -11,6 +11,16 @@
 (function () {
     'use strict';
 
+    // ── Zoom/Pan state ──────────────────────────────────────────────
+    let vpX = 0, vpY = 0;
+    let vpW = 1400, vpH = 420;
+    const VP_W0 = 1400, VP_H0 = 420;
+    const MIN_ZOOM = 1.0;
+    const MAX_ZOOM = 5.0;
+    let isDragging = false;
+    let dragStartX = 0, dragStartY = 0;
+    let vpStartX = 0, vpStartY = 0;
+
     // ----------------------------------------------------------------
     // Coordinate mapping
     // Facility: X 466–680 ft, Y 478–542 ft  (Y increases north in DXF)
@@ -52,6 +62,26 @@
     const vehicles = {};       // vehicleId → { dot, label, state }
     const nodePositions = {};  // nodeId → { x, y }
 
+    function applyViewBox() {
+        const svg = document.getElementById('fleet-map');
+        if (svg) svg.setAttribute('viewBox', `${vpX} ${vpY} ${vpW} ${vpH}`);
+    }
+
+    function clampPan() {
+        vpX = Math.max(0, Math.min(vpX, VP_W0 - vpW));
+        vpY = Math.max(0, Math.min(vpY, VP_H0 - vpH));
+    }
+
+    function zoom(factor, centerX, centerY) {
+        const newW = Math.min(VP_W0, Math.max(VP_W0 / MAX_ZOOM, vpW * factor));
+        const newH = Math.min(VP_H0, Math.max(VP_H0 / MAX_ZOOM, vpH * factor));
+        vpX += (vpW - newW) * ((centerX - vpX) / vpW);
+        vpY += (vpH - newH) * ((centerY - vpY) / vpH);
+        vpW = newW;
+        vpH = newH;
+        clampPan();
+        applyViewBox();
+    }
     // ----------------------------------------------------------------
     // Load roadmap and render
     // ----------------------------------------------------------------
@@ -140,6 +170,46 @@
             vehicles[i] = { dot, label, state: 'state-idle' };
         }
 
+        // ── Zoom/Pan event listeners ─────────────────────────────────
+        svg.addEventListener('wheel', function (e) {
+            e.preventDefault();
+            const rect = svg.getBoundingClientRect();
+            const mx = vpX + (e.clientX - rect.left) / rect.width * vpW;
+            const my = vpY + (e.clientY - rect.top) / rect.height * vpH;
+            const factor = e.deltaY > 0 ? 1.15 : 0.87;
+            zoom(factor, mx, my);
+        }, { passive: false });
+
+        svg.addEventListener('mousedown', function (e) {
+            if (e.button !== 0) return;
+            isDragging = true;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            vpStartX = vpX;
+            vpStartY = vpY;
+            svg.style.cursor = 'grabbing';
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (!isDragging) return;
+            const rect = document.getElementById('fleet-map').getBoundingClientRect();
+            const dx = (e.clientX - dragStartX) / rect.width * vpW;
+            const dy = (e.clientY - dragStartY) / rect.height * vpH;
+            vpX = vpStartX - dx;
+            vpY = vpStartY - dy;
+            clampPan();
+            applyViewBox();
+        });
+
+        document.addEventListener('mouseup', function () {
+            if (!isDragging) return;
+            isDragging = false;
+            const svg = document.getElementById('fleet-map');
+            if (svg) svg.style.cursor = 'grab';
+        });
+
+        svg.style.cursor = 'grab';
+
         console.log('fleet-map: map rendered —',
             roadmap.nodes.length, 'nodes,',
             roadmap.edges.length, 'edges');
@@ -187,7 +257,7 @@
 
             const startX = v.currentX;
             const startY = v.currentY;
-            const duration = 1000; // 1 seconds in ms
+            const duration = 250; // 0.25 seconds in ms
             const startTime = performance.now();
 
             function animate(now) {
@@ -231,6 +301,18 @@
         setDotNetRef: function (dotNetRef) {
             window.fleetMap._dotNetRef = dotNetRef;
         },
+
+        zoomIn: function () {
+            zoom(0.7, vpX + vpW / 2, vpY + vpH / 2);
+        },
+        zoomOut: function () {
+            zoom(1.4, vpX + vpW / 2, vpY + vpH / 2);
+        },
+        resetView: function () {
+            vpX = 0; vpY = 0;
+            vpW = VP_W0; vpH = VP_H0;
+            applyViewBox();
+        },
     };
 
     // ----------------------------------------------------------------
@@ -266,22 +348,23 @@
     }
 
     document.addEventListener('click', function (e) {
-        console.log('Click detected on:', e.target.tagName, e.target.className);
         const target = e.target;
 
-        // Vehicle dot clicked
         if (target.classList.contains('vehicle-dot')) {
             const vid = parseInt(target.getAttribute('data-vid'));
             console.log('Vehicle dot clicked:', vid);
-            if (window.fleetMap._dotNetRef)
-                window.fleetMap._dotNetRef.invokeMethodAsync('OnVehicleClicked', vid);
+            setTimeout(function () {
+                if (window.fleetMap._dotNetRef)
+                    window.fleetMap._dotNetRef.invokeMethodAsync('OnVehicleClicked', vid);
+            }, 0);
             return;
         }
 
-        // Close button clicked
         if (target.classList.contains('popup-close')) {
-            if (window.fleetMap._dotNetRef)
-                window.fleetMap._dotNetRef.invokeMethodAsync('ClosePopup');
+            setTimeout(function () {
+                if (window.fleetMap._dotNetRef)
+                    window.fleetMap._dotNetRef.invokeMethodAsync('ClosePopup');
+            }, 0);
             return;
         }
     });

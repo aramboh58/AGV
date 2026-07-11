@@ -38,6 +38,11 @@
         <!-- ── Floor Map ──────────────────────────────────────── -->
         <section class="map-panel">
             <div class="panel-label">FLOOR MAP — NYT COLLEGE POINT</div>
+            <div class="map-controls">
+                <button class="map-btn" onclick="window.fleetMap.zoomIn()">+</button>
+                <button class="map-btn" onclick="window.fleetMap.zoomOut()">−</button>
+                <button class="map-btn" onclick="window.fleetMap.resetView()">⌂</button>
+            </div>
             <div class="map-container" id="map-container-placeholder"></div>
             
         </section>

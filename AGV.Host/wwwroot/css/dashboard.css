@@ -574,3 +574,35 @@ html, body {
     color: var(--accent-cyan);
     background: #0a1929;
 }
+.map-controls {
+    position: absolute;
+    top: 36px;
+    right: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 50;
+    pointer-events: all;
+}
+
+.map-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 14px;
+    font-weight: 700;
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+}
+
+    .map-btn:hover {
+        border-color: var(--accent-cyan);
+        color: var(--accent-cyan);
+    }
