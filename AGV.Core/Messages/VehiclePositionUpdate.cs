@@ -50,6 +50,9 @@ namespace AGV.Core.Messages
         /// </summary>
         public decimal Y { get; init; }
 
+        /// <summary>Current vehicle heading in degrees.</summary>
+        public decimal Heading { get; init; }
+
         /// <summary>UTC timestamp when this update was received.</summary>
         public DateTime ReceivedAt { get; init; } = DateTime.UtcNow;
     }

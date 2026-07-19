@@ -11,16 +11,6 @@
 (function () {
     'use strict';
 
-    // ── Zoom/Pan state ──────────────────────────────────────────────
-    let vpX = 0, vpY = 0;
-    let vpW = 1400, vpH = 420;
-    const VP_W0 = 1400, VP_H0 = 420;
-    const MIN_ZOOM = 1.0;
-    const MAX_ZOOM = 5.0;
-    let isDragging = false;
-    let dragStartX = 0, dragStartY = 0;
-    let vpStartX = 0, vpStartY = 0;
-
     // ----------------------------------------------------------------
     // Coordinate mapping
     // Facility: X 466–680 ft, Y 478–542 ft  (Y increases north in DXF)
@@ -40,7 +30,6 @@
     }
 
     function toSvgY(fy) {
-        // Flip Y: DXF Y increases north, SVG Y increases down
         return PAD + ((FACILITY.yMax - fy) / (FACILITY.yMax - FACILITY.yMin)) * DRAW_H;
     }
 
@@ -59,8 +48,21 @@
     // ----------------------------------------------------------------
     // Vehicle state tracking
     // ----------------------------------------------------------------
-    const vehicles = {};       // vehicleId → { dot, label, state }
-    const nodePositions = {};  // nodeId → { x, y }
+    const vehicles = {};
+    const nodePositions = {};
+    const edgeSpeeds = {}; // "fromId:toId" → speed in m/s
+    let roadmap = null;
+
+    // ----------------------------------------------------------------
+    // Zoom/Pan state
+    // ----------------------------------------------------------------
+    let vpX = 0, vpY = 0;
+    let vpW = 1400, vpH = 420;
+    const VP_W0 = 1400, VP_H0 = 420;
+    const MAX_ZOOM = 5.0;
+    let isDragging = false;
+    let dragStartX = 0, dragStartY = 0;
+    let vpStartX = 0, vpStartY = 0;
 
     function applyViewBox() {
         const svg = document.getElementById('fleet-map');
@@ -82,6 +84,78 @@
         clampPan();
         applyViewBox();
     }
+
+    // ----------------------------------------------------------------
+    // Single shared animation loop
+    // ----------------------------------------------------------------
+    const animTargets = {};
+    let animLoopRunning = false;
+
+    function startAnimLoop() {
+        if (animLoopRunning) return;
+        animLoopRunning = true;
+        requestAnimationFrame(animLoop);
+    }
+
+    function animLoop(now) {
+        let anyActive = false;
+        for (const [vid, target] of Object.entries(animTargets)) {
+            const v = vehicles[parseInt(vid)];
+            if (!v) continue;
+            const duration = target.duration || 250;
+            const elapsed = now - target.startTime;
+            const t = Math.min(elapsed / duration, 1);
+            const cx = target.startX + (target.targetX - target.startX) * t;
+            const cy = target.startY + (target.targetY - target.startY) * t;
+            const ch = target.startHeading + (target.targetHeading - target.startHeading) * t;
+            v.group.setAttribute('transform',
+                `translate(${cx},${cy}) rotate(${svgHeading(ch)})`);
+            v.currentX = cx;
+            v.currentY = cy;
+            v.currentHeading = ch;
+            if (t < 1) {
+                anyActive = true;
+            } else {
+                if (target.onComplete) target.onComplete();
+                delete animTargets[vid];
+            }
+        }
+        if (anyActive) {
+            requestAnimationFrame(animLoop);
+        } else {
+            animLoopRunning = false;
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Silhouette path functions
+    // ----------------------------------------------------------------
+    function forkSilhouette() {
+        return [
+            'M -8,-5 L 6,-5 L 6,5 L -8,5 Z',
+            'M 6,-4 L 9,-4 L 9,4 L 6,4 Z',
+            'M -2,-3 L 5,-3 L 5,3 L -2,3 Z',
+            'M -9,-3 L -7,-3 L -7,3 L -9,3 Z',
+            'M -18,-4 L -9,-4 L -9,-2 L -18,-2 Z',
+            'M -18,2 L -9,2 L -9,4 L -18,4 Z',
+        ].join(' ');
+    }
+
+    function wasteBinSilhouette() {
+        return [
+            'M -8,-5 L 8,-5 L 8,5 L -8,5 Z',
+            'M -6,-4 L 4,-4 L 4,4 L -6,4 Z',
+            'M 4,-3 L 7,-3 L 7,3 L 4,3 Z',
+        ].join(' ');
+    }
+
+    // ----------------------------------------------------------------
+    // Heading conversion
+    // ----------------------------------------------------------------
+    function svgHeading(facilityDegrees) {
+        return -facilityDegrees;
+    }
+
     // ----------------------------------------------------------------
     // Load roadmap and render
     // ----------------------------------------------------------------
@@ -89,7 +163,6 @@
         if (init._done) return;
         init._done = true;
 
-        let roadmap;
         try {
             const resp = await fetch('/nyt_agv_roadmap.json');
             roadmap = await resp.json();
@@ -101,8 +174,8 @@
         const svg = document.getElementById('fleet-map');
         if (!svg) return;
 
-        const edgesLayer   = document.getElementById('edges-layer');
-        const nodesLayer   = document.getElementById('nodes-layer');
+        const edgesLayer = document.getElementById('edges-layer');
+        const nodesLayer = document.getElementById('nodes-layer');
         const vehicleLayer = document.getElementById('vehicles-layer');
 
         // ── Build node position lookup ──────────────────────────────
@@ -112,6 +185,11 @@
             nodePositions[node.nodeId] = { x: sx, y: sy };
         }
 
+        // ── Build edge speed lookup ──────────────────────────────────
+        for (const edge of roadmap.edges) {
+            edgeSpeeds[`${edge.startNodeId}:${edge.endNodeId}`] = edge.speed;
+        }
+
         const crossIds = (window.dashboardConfig && window.dashboardConfig.crossCorridorMoveIds)
             ? new Set(window.dashboardConfig.crossCorridorMoveIds)
             : new Set();
@@ -119,17 +197,14 @@
         // ── Render edges ────────────────────────────────────────────
         for (const edge of roadmap.edges) {
             const from = nodePositions[edge.startNodeId];
-            const to   = nodePositions[edge.endNodeId];
+            const to = nodePositions[edge.endNodeId];
             if (!from || !to) continue;
 
-            const line = document.createElementNS(
-                'http://www.w3.org/2000/svg', 'line');
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
             line.setAttribute('x1', from.x);
             line.setAttribute('y1', from.y);
             line.setAttribute('x2', to.x);
             line.setAttribute('y2', to.y);
-
-            // Cross-corridor connections get a brighter style
             const isCross = crossIds.has(edge.edgeId);
             line.setAttribute('class', isCross ? 'map-edge-cross' : 'map-edge');
             edgesLayer.appendChild(line);
@@ -140,34 +215,60 @@
             const pos = nodePositions[node.nodeId];
             if (!pos) continue;
 
-            const circle = document.createElementNS(
-                'http://www.w3.org/2000/svg', 'circle');
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
             circle.setAttribute('cx', pos.x);
             circle.setAttribute('cy', pos.y);
             circle.setAttribute('class', nodeClass(node));
             nodesLayer.appendChild(circle);
         }
 
-        // ── Initialise 20 vehicle dots (F01–F20) ─────────────────────
-        // They start hidden at origin until first position update arrives
+        // ── Initialise 20 vehicle groups (F01–F20) ──────────────────
         for (let i = 1; i <= 20; i++) {
-            const dot = document.createElementNS(
-                'http://www.w3.org/2000/svg', 'circle');
-            dot.setAttribute('cx', -100);
-            dot.setAttribute('cy', -100);
-            dot.setAttribute('class', 'vehicle-dot state-idle');
-            dot.setAttribute('data-vid', i);
+            const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            g.setAttribute('class', 'vehicle-group state-idle');
+            g.setAttribute('data-vid', i);
+            g.setAttribute('transform', 'translate(-100,-100) rotate(0)');
 
-            const label = document.createElementNS(
-                'http://www.w3.org/2000/svg', 'text');
-            label.setAttribute('x', -100);
-            label.setAttribute('y', -100);
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('class', 'vehicle-shape');
+            path.setAttribute('d', forkSilhouette());
+            path.setAttribute('pointer-events', 'all');
+
+            const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             label.setAttribute('class', 'vehicle-label');
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('dominant-baseline', 'middle');
+            label.setAttribute('dy', '12');
+            label.setAttribute('pointer-events', 'none');
             label.textContent = `F${String(i).padStart(2, '0')}`;
 
-            vehicleLayer.appendChild(dot);
-            vehicleLayer.appendChild(label);
-            vehicles[i] = { dot, label, state: 'state-idle' };
+            const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            hitArea.setAttribute('x', '-25');
+            hitArea.setAttribute('y', '-15');
+            hitArea.setAttribute('width', '50');
+            hitArea.setAttribute('height', '30');
+            hitArea.setAttribute('fill', 'transparent');
+            hitArea.setAttribute('pointer-events', 'all');
+            g.appendChild(hitArea);
+
+            g.appendChild(path);
+            g.appendChild(label);
+            vehicleLayer.appendChild(g);
+
+            vehicles[i] = {
+                group: g,
+                path: path,
+                label: label,
+                state: 'state-idle',
+                positioned: false,
+                currentX: -100,
+                currentY: -100,
+                currentHeading: 0,
+                vehicleType: 'Fork',
+                routeNodeIds: [],      // planned route
+                routeIndex: 0,         // current position in route
+                routeActive: false,    // dead-reckoning active
+            };
         }
 
         // ── Zoom/Pan event listeners ─────────────────────────────────
@@ -216,23 +317,33 @@
     }
 
     // ----------------------------------------------------------------
-    // Public API — called from Dashboard.razor / SignalR callbacks
+    // Public API
     // ----------------------------------------------------------------
-
     window.fleetMap = {
 
         init: init,
 
-        /** Update vehicle position on the SVG map. */
-        updatePosition: function (vehicleId, x, y, nodeId) {
+        updatePosition: function (vehicleId, x, y, nodeId, heading) {
             const v = vehicles[vehicleId];
             if (!v) return;
 
-            let targetX, targetY;
+            // If dead-reckoning is active, use server position as sync correction
+            if (v.routeActive && nodeId) {
+                const parsedNodeId = parseInt(nodeId);
+                const idx = v.routeNodeIds.indexOf(parsedNodeId);
+                if (idx >= 0 && idx > v.routeIndex) {
+                    v.routeIndex = idx;
+                }
+                return; // let dead-reckoning drive the animation
+            }
 
-            if (nodeId && nodePositions[nodeId]) {
-                targetX = nodePositions[nodeId].x;
-                targetY = nodePositions[nodeId].y;
+            // Non-dead-reckoning path (idle, charging, etc.)
+            let targetX, targetY;
+            let targetHeading = heading !== undefined ? heading : v.currentHeading;
+
+            if (nodeId && nodePositions[parseInt(nodeId)]) {
+                targetX = nodePositions[parseInt(nodeId)].x;
+                targetY = nodePositions[parseInt(nodeId)].y;
             } else if (x != null && y != null) {
                 targetX = toSvgX(parseFloat(x));
                 targetY = toSvgY(parseFloat(y));
@@ -240,85 +351,91 @@
                 return;
             }
 
-            // First placement — no animation
             if (!v.positioned) {
-                v.dot.setAttribute('cx', targetX);
-                v.dot.setAttribute('cy', targetY);
-                v.label.setAttribute('x', targetX);
-                v.label.setAttribute('y', targetY);
+                v.group.setAttribute('transform',
+                    `translate(${targetX},${targetY}) rotate(${svgHeading(targetHeading)})`);
                 v.currentX = targetX;
                 v.currentY = targetY;
+                v.currentHeading = targetHeading;
                 v.positioned = true;
                 return;
             }
 
-            // Cancel any existing animation
-            if (v.animFrame) cancelAnimationFrame(v.animFrame);
+            animTargets[vehicleId] = {
+                targetX, targetY, targetHeading,
+                startX: v.currentX,
+                startY: v.currentY,
+                startHeading: v.currentHeading,
+                startTime: performance.now(),
+                duration: 250
+            };
 
-            const startX = v.currentX;
-            const startY = v.currentY;
-            const duration = 250; // 0.25 seconds in ms
-            const startTime = performance.now();
-
-            function animate(now) {
-                const elapsed = now - startTime;
-                const t = Math.min(elapsed / duration, 1);
-
-                const cx = startX + (targetX - startX) * t;
-                const cy = startY + (targetY - startY) * t;
-
-                v.dot.setAttribute('cx', cx);
-                v.dot.setAttribute('cy', cy);
-                v.label.setAttribute('x', cx);
-                v.label.setAttribute('y', cy);
-
-                v.currentX = cx;
-                v.currentY = cy;
-
-                if (t < 1) {
-                    v.animFrame = requestAnimationFrame(animate);
-                }
-            }
-
-            v.animFrame = requestAnimationFrame(animate);
+            startAnimLoop();
         },
 
-        /** Update vehicle state (changes dot color). */
-        updateState: function (vehicleId, activityState) {
-            const labelColor = stateLabelColor(activityState);
-            v.label.setAttribute('fill', labelColor);
-
+        updateState: function (vehicleId, activityState, vehicleType) {
             const v = vehicles[vehicleId];
             if (!v) return;
 
             const stateClass = activityStateToClass(activityState);
             if (v.state !== stateClass) {
-                v.dot.setAttribute('class', `vehicle-dot ${stateClass}`);
+                v.group.setAttribute('class', `vehicle-group ${stateClass}`);
                 v.state = stateClass;
             }
+
+            if (vehicleType && vehicleType !== v.vehicleType) {
+                v.vehicleType = vehicleType;
+                v.path.setAttribute('d',
+                    vehicleType === 'WasteBin'
+                        ? wasteBinSilhouette()
+                        : forkSilhouette());
+            }
+
+            const labelColor = stateLabelColor(activityState);
+            v.label.setAttribute('fill', labelColor);
+        },
+
+        zoomIn: function () {
+            zoom(0.7, vpX + vpW / 2, vpY + vpH / 2);
+        },
+
+        zoomOut: function () {
+            zoom(1.4, vpX + vpW / 2, vpY + vpH / 2);
+        },
+
+        resetView: function () {
+            vpX = 0; vpY = 0;
+            vpW = VP_W0; vpH = VP_H0;
+            applyViewBox();
         },
 
         setDotNetRef: function (dotNetRef) {
             window.fleetMap._dotNetRef = dotNetRef;
         },
 
-        zoomIn: function () {
-            zoom(0.7, vpX + vpW / 2, vpY + vpH / 2);
-        },
-        zoomOut: function () {
-            zoom(1.4, vpX + vpW / 2, vpY + vpH / 2);
-        },
-        resetView: function () {
-            vpX = 0; vpY = 0;
-            vpW = VP_W0; vpH = VP_H0;
-            applyViewBox();
+        setVehicleRoute: function (vehicleId, routeNodeIds) {
+            const v = vehicles[vehicleId];
+            if (!v) return;
+
+            if (!routeNodeIds || routeNodeIds.length === 0) {
+                v.routeNodeIds = [];
+                v.routeIndex = 0;
+                v.routeActive = false;
+                return;
+            }
+
+            v.routeNodeIds = routeNodeIds;
+            v.routeIndex = 0;
+            v.routeActive = true;
+
+            // Start dead-reckoning from current position
+            scheduleNextMove(vehicleId);
         },
     };
 
     // ----------------------------------------------------------------
-    // Helper
+    // Helpers
     // ----------------------------------------------------------------
-
     function activityStateToClass(state) {
         switch (state) {
             case 'TravelingToPickup':
@@ -347,12 +464,78 @@
         }
     }
 
+    function scheduleNextMove(vehicleId) {
+        const v = vehicles[vehicleId];
+        if (!v || !v.routeActive) return;
+        if (v.routeIndex >= v.routeNodeIds.length - 1) {
+            v.routeActive = false;
+            return;
+        }
+
+        const fromId = v.routeNodeIds[v.routeIndex];
+        const toId = v.routeNodeIds[v.routeIndex + 1];
+        const fromPos = nodePositions[fromId];
+        const toPos = nodePositions[toId];
+
+        if (!fromPos || !toPos) {
+            v.routeIndex++;
+            scheduleNextMove(vehicleId);
+            return;
+        }
+
+        // Get speed for this segment
+        const speedKey = `${fromId}:${toId}`;
+        const speedMs = edgeSpeeds[speedKey] || 1.0; // m/s
+        const speedCmS = speedMs * 100;
+
+        // Calculate distance in facility cm
+        const fromNode = roadmap.nodes.find(n => n.nodeId === fromId);
+        const toNode = roadmap.nodes.find(n => n.nodeId === toId);
+        let distanceCm = 4000; // default
+        if (fromNode && toNode) {
+            const dx = toNode.x - fromNode.x;
+            const dy = toNode.y - fromNode.y;
+            distanceCm = Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // Duration in ms at real speed
+        const durationMs = (distanceCm / speedCmS) * 1000;
+
+        // Calculate heading
+        const heading = Math.atan2(
+            -(toPos.y - fromPos.y),
+            toPos.x - fromPos.x) * 180 / Math.PI;
+
+        // Animate this segment
+        animTargets[vehicleId] = {
+            targetX: toPos.x,
+            targetY: toPos.y,
+            targetHeading: heading,
+            startX: v.currentX,
+            startY: v.currentY,
+            startHeading: v.currentHeading,
+            startTime: performance.now(),
+            duration: durationMs,
+            onComplete: function () {
+                v.routeIndex++;
+                scheduleNextMove(vehicleId);
+            }
+        };
+
+        startAnimLoop();
+    }
+
+    // ----------------------------------------------------------------
+    // Click handling
+    // ----------------------------------------------------------------
     document.addEventListener('click', function (e) {
         const target = e.target;
+        console.log('Click target:', target.tagName, target.className, target.getAttribute('data-vid'));
 
-        if (target.classList.contains('vehicle-dot')) {
-            const vid = parseInt(target.getAttribute('data-vid'));
-            console.log('Vehicle dot clicked:', vid);
+        const group = target.closest('.vehicle-group');
+        if (group) {
+            const vid = parseInt(group.getAttribute('data-vid'));
+            console.log('Vehicle clicked:', vid);
             setTimeout(function () {
                 if (window.fleetMap._dotNetRef)
                     window.fleetMap._dotNetRef.invokeMethodAsync('OnVehicleClicked', vid);
@@ -368,4 +551,5 @@
             return;
         }
     });
+
 })();

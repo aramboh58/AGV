@@ -29,6 +29,9 @@ namespace AGV.Core.Messages
         /// <summary>VDA 5050 serialNumber.</summary>
         public string SerialNumber { get; init; } = string.Empty;
 
+        /// <summary>Physical vehicle classification.</summary>
+        public string VehicleType { get; init; } = string.Empty;
+
         /// <summary>Current activity state.</summary>
         public ActivityState ActivityState { get; init; }
 

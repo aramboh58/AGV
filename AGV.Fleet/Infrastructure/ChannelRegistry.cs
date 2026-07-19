@@ -189,6 +189,8 @@ namespace AGV.Fleet.Infrastructure
             Channel.CreateUnbounded<SimClockUpdate>();
         public Channel<AlertUpdate> Alerts { get; } =
             Channel.CreateUnbounded<AlertUpdate>();
+        public Channel<VehicleMissionUpdate> MissionUpdates { get; } =
+            Channel.CreateUnbounded<VehicleMissionUpdate>();
     }
 
     /// <summary>

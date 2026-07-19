@@ -66,11 +66,12 @@ namespace AGV.Dashboard.Services
 
             // Run position, state, and mission broadcast loops concurrently
             await Task.WhenAll(
-               BroadcastPositionsAsync(stoppingToken),
-               BroadcastStatesAsync(stoppingToken),
-               BroadcastMissionCountersAsync(stoppingToken),
-               BroadcastSimClockAsync(stoppingToken),
-               BroadcastAlertsAsync(stoppingToken));
+                BroadcastPositionsAsync(stoppingToken),
+                BroadcastStatesAsync(stoppingToken),
+                BroadcastMissionCountersAsync(stoppingToken),
+                BroadcastSimClockAsync(stoppingToken),
+                BroadcastAlertsAsync(stoppingToken),
+                BroadcastMissionUpdatesAsync(stoppingToken)); ;
         }
 
         // ----------------------------------------------------------------
@@ -96,7 +97,8 @@ namespace AGV.Dashboard.Services
                             update.SerialNumber,
                             update.X,
                             update.Y,
-                            update.NodeId.ToString());
+                            update.NodeId.ToString(),
+                            update.Heading);
                     }
 
                     // Broadcast latest position for each vehicle
@@ -145,7 +147,8 @@ namespace AGV.Dashboard.Services
                         update.BatteryStateOfCharge,
                         update.IsCharging,
                         update.IsLoaded,
-                        update.CurrentOrderId ?? string.Empty);
+                        update.CurrentOrderId ?? string.Empty,
+                        update.VehicleType);
 
                     await _hub.Clients.All.SendAsync(
                         "UpdateVehicleState", dto, ct);
@@ -277,6 +280,22 @@ namespace AGV.Dashboard.Services
                 vehicle.PlannedRouteNodeIds.ToList(),
                 vehicle.CurrentNodeId,
                 socPoints);
+        }
+        private async Task BroadcastMissionUpdatesAsync(CancellationToken ct)
+        {
+            await foreach (var update in
+                _channels.MissionUpdates.Reader.ReadAllAsync(ct))
+            {
+                await _hub.Clients.All.SendAsync(
+                    "UpdateVehicleMission",
+                    new
+                    {
+                        update.VehicleId,
+                        update.MissionId,
+                        RouteNodeIds = update.RouteNodeIds.ToList()
+                    },
+                    ct);
+            }
         }
     }
 }

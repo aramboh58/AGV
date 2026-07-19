@@ -14,6 +14,8 @@ using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
 using System.Text.Json;
+using AGV.Core.Entities;
+using AGV.Core.Enums;
 
 namespace AGV.Mqtt.Services
 {
@@ -44,6 +46,7 @@ namespace AGV.Mqtt.Services
         private readonly Vda5050TopicRouter _topicRouter;
         private readonly ConnectionStateTracker _connectionTracker;
         private readonly ChannelRegistry _channels;
+        private readonly VehicleRegistry _vehicleRegistry;
         private readonly ILogger _logger;
         private readonly ILogger _messageLogger;
 
@@ -63,16 +66,16 @@ namespace AGV.Mqtt.Services
             Vda5050TopicRouter topicRouter,
             ConnectionStateTracker connectionTracker,
             ChannelRegistry channels,
+            VehicleRegistry vehicleRegistry,
             ILoggerFactory loggerFactory)
         {
             _options = options;
             _topicRouter = topicRouter;
             _connectionTracker = connectionTracker;
             _channels = channels;
-            _logger = loggerFactory
-                .CreateLogger(LogDomains.Mqtt);
-            _messageLogger = loggerFactory
-                .CreateLogger(LogDomains.VdaMessages);
+            _vehicleRegistry = vehicleRegistry;
+            _logger = loggerFactory.CreateLogger(LogDomains.Mqtt);
+            _messageLogger = loggerFactory.CreateLogger(LogDomains.VdaMessages);
         }
 
         // ----------------------------------------------------------------
@@ -244,6 +247,7 @@ namespace AGV.Mqtt.Services
                 "TEACHING" => Core.Enums.OperatingMode.Teaching,
                 _ => Core.Enums.OperatingMode.Automatic,
             };
+            var vehicle = _vehicleRegistry.GetBySerialNumber(serialNumber);
 
             var update = new VehicleStateUpdate
             {
@@ -256,6 +260,7 @@ namespace AGV.Mqtt.Services
                 OrderUpdateId = dto.OrderUpdateId,
                 OperatingMode = operatingMode,
                 Errors = errors,
+                VehicleType = vehicle?.VehicleType.ToString() ?? string.Empty,
                 ReceivedAt = DateTime.UtcNow,
             };
 

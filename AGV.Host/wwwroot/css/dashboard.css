@@ -372,24 +372,40 @@ html, body {
                     stroke-width: 1.5; r: 4; }
 
 /* Vehicle dots */
-.vehicle-dot {
+.vehicle-group {
     pointer-events: all;
     cursor: pointer;
-    r: 6;
-    stroke-width: 1.5;
     filter: drop-shadow(0 0 3px currentColor);
 }
 
-.vehicle-dot.state-idle      { fill: var(--state-idle-fg);
-                                stroke: var(--state-idle-fg); }
-.vehicle-dot.state-traveling { fill: var(--state-traveling-fg);
-                                stroke: var(--state-traveling-fg); }
-.vehicle-dot.state-loaded    { fill: var(--state-loaded-fg);
-                                stroke: var(--state-loaded-fg); }
-.vehicle-dot.state-forking   { fill: var(--state-forking-fg);
-                                stroke: var(--state-forking-fg); }
-.vehicle-dot.state-charging  { fill: var(--state-charging-fg);
-                                stroke: var(--state-charging-fg); }
+.vehicle-shape {
+    stroke-width: 1;
+}
+
+.vehicle-group.state-idle .vehicle-shape {
+    fill: var(--state-idle-fg);
+    stroke: var(--state-idle-fg);
+}
+
+.vehicle-group.state-traveling .vehicle-shape {
+    fill: var(--state-traveling-fg);
+    stroke: var(--state-traveling-fg);
+}
+
+.vehicle-group.state-loaded .vehicle-shape {
+    fill: var(--state-loaded-fg);
+    stroke: var(--state-loaded-fg);
+}
+
+.vehicle-group.state-forking .vehicle-shape {
+    fill: var(--state-forking-fg);
+    stroke: var(--state-forking-fg);
+}
+
+.vehicle-group.state-charging .vehicle-shape {
+    fill: var(--state-charging-fg);
+    stroke: var(--state-charging-fg);
+}
 
 .vehicle-label {
     font-family: var(--font-mono);

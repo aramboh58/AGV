@@ -208,18 +208,23 @@
             .Build();
 
         _hub.On<VehicleStatePayload>("UpdateVehicleState", state =>
+    {
+    _vehicleStates[state.VehicleId] = new VehicleDisplayState
         {
-            _vehicleStates[state.VehicleId] = new VehicleDisplayState
-            {
-                VehicleId  = state.VehicleId,
-                SerialNumber = state.SerialNumber,
-                ActivityState = state.ActivityState,
-                SocPercent = state.SocPercent,
-                IsCharging = state.IsCharging,
-                IsLoaded   = state.IsLoaded,
-            };
-            InvokeAsync(StateHasChanged);
-        });
+            VehicleId = state.VehicleId,
+            SerialNumber = state.SerialNumber,
+            ActivityState = state.ActivityState,
+            SocPercent = state.SocPercent,
+            IsCharging = state.IsCharging,
+            IsLoaded = state.IsLoaded,
+            VehicleType = state.VehicleType,
+        };
+        // Also update JS map
+        Task.Run(() => JS.InvokeVoidAsync(
+            "fleetMap.updateState", state.VehicleId,
+            state.ActivityState, state.VehicleType));
+        InvokeAsync(StateHasChanged);
+    });
 
         _hub.On<MissionCounterPayload>("UpdateMissionCounters", counters =>
         {
@@ -237,7 +242,8 @@
             var x = (double)pos.X;
             var y = (double)pos.Y;
             var nodeId = pos.NodeId;
-            Task.Run(() => JS.InvokeVoidAsync("fleetMap.updatePosition", id, x, y, nodeId));
+            var heading = (double)pos.Heading;
+            Task.Run(() => JS.InvokeVoidAsync("fleetMap.updatePosition", id, x, y, nodeId, heading));
         });
 
         // Update the simulation clock
@@ -261,6 +267,14 @@
         //Console.WriteLine($"UpdateVehicleDetail received: V{detail.VehicleId}");
         _selectedVehicle = detail;
         InvokeAsync(StateHasChanged);
+        });
+
+        _hub.On<VehicleMissionPayload>("UpdateVehicleMission", mission =>
+        {
+            var id = mission.VehicleId;
+            var routeJson = System.Text.Json.JsonSerializer.Serialize(mission.RouteNodeIds);
+            Task.Run(() => JS.InvokeVoidAsync(
+                "fleetMap.setVehicleRoute", id, mission.RouteNodeIds.ToArray()));
         });
 
         _hub.Reconnected += _ =>
@@ -368,19 +382,21 @@
         public decimal SocPercent { get; set; }
         public bool IsCharging { get; set; }
         public bool IsLoaded { get; set; }
+        public string VehicleType { get; set; } = "";
     }
 
     private sealed record VehicleStatePayload(
         int VehicleId, string SerialNumber, string ActivityState,
         decimal SocPercent, bool IsCharging, bool IsLoaded,
-        string CurrentOrderId);
+        string CurrentOrderId, string VehicleType);
 
     private sealed record MissionCounterPayload(
         int Enqueued, int Dispatched, int Completed, int QueueDepth);
 
     private sealed record VehiclePositionPayload(
         int VehicleId, string SerialNumber,
-        decimal X, decimal Y, string NodeId);
+        decimal X, decimal Y, string NodeId,
+        decimal Heading);
     
     private sealed record AlertPayload(
         string Type, int VehicleId,
@@ -401,6 +417,13 @@
         public List<decimal> SocHistory { get; set; } = new();
     }
     private readonly List<AlertPayload> _alerts = new();
+
+    private sealed class VehicleMissionPayload
+    {
+        public int VehicleId { get; set; }
+        public int? MissionId { get; set; }
+        public List<int> RouteNodeIds { get; set; } = new();
+    }
 
     [JSInvokable]
     public async Task OnVehicleClicked(int vehicleId)

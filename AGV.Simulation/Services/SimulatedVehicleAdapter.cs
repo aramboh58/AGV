@@ -425,6 +425,10 @@ namespace AGV.Simulation.Services
                     state.Vehicle.UpdatePosition(
                         toId, state.Vehicle.CurrentMapId);
 
+                    // Update heading to move's end heading
+                    if (move is not null)
+                        state.CurrentHeading = move.Clothoid.EndHeading;
+
                     // Update interpolated position
                     var node = RoadMap.GetNode(toId);
                     if (node is not null)
@@ -448,6 +452,12 @@ namespace AGV.Simulation.Services
                         state.CurrentY = fromNode.Position.Y
                             + (toNode.Position.Y
                                - fromNode.Position.Y) * pct;
+
+                        // Interpolate heading
+                        if (move is not null)
+                            state.CurrentHeading = move.Clothoid.StartHeading
+                                + (move.Clothoid.EndHeading
+                                   - move.Clothoid.StartHeading) * pct;
                     }
                 }
             }
@@ -512,6 +522,7 @@ namespace AGV.Simulation.Services
                 LastNodeId = state.CurrentNodeId,
                 OrderUpdateId = 0,
                 Errors = Array.Empty<string>(),
+                VehicleType = state.Vehicle.VehicleType.ToString(),
                 ReceivedAt = DateTime.UtcNow,
             };
 
@@ -529,6 +540,7 @@ namespace AGV.Simulation.Services
                 MapId = state.Vehicle.CurrentMapId,
                 X = state.CurrentX,
                 Y = state.CurrentY,
+                Heading = state.CurrentHeading,
                 ReceivedAt = DateTime.UtcNow,
             };
 
@@ -579,6 +591,7 @@ namespace AGV.Simulation.Services
         public int CurrentNodeId { get; set; }
         public decimal CurrentX { get; set; }
         public decimal CurrentY { get; set; }
+        public decimal CurrentHeading { get; set; }
         public string CurrentOrderId { get; set; } = string.Empty;
 
         // Travel state

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using AGV.Core.Entities;
@@ -369,6 +370,13 @@ namespace AGV.Fleet.Services
                 await _channels.DispatchDecisions.Writer
                     .WriteAsync(decision, stoppingToken);
 
+                await _channels.MissionUpdates.Writer.WriteAsync(
+                    new VehicleMissionUpdate(
+                        vehicle.VehicleId,
+                        mission.MissionId,
+                        vehicle.PlannedRouteNodeIds),
+                    stoppingToken);
+
                 _dispatchLogger.LogInformation(
                     "Dispatched vehicle {VehicleId} → " +
                     "mission {MissionId} " +
@@ -440,8 +448,13 @@ namespace AGV.Fleet.Services
                 && vehicle.CurrentMissionId.HasValue)
             {
                 vehicle.ClearMission();
-                Interlocked.Increment(ref _completedMissions);
-                _dispatchLogger.LogInformation(
+                await _channels.MissionUpdates.Writer.WriteAsync(
+                    new VehicleMissionUpdate(
+                        vehicle.VehicleId,
+                        null,
+                        Array.Empty<int>()),
+                    stoppingToken);
+                Interlocked.Increment(ref _completedMissions); _dispatchLogger.LogInformation(
                     "Vehicle {VehicleId} completed mission — total completed: {Total}",
                     vehicle.VehicleId, _completedMissions);
                 await _channels.MissionCounters.Writer.WriteAsync(

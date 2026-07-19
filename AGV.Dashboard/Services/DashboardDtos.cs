@@ -6,7 +6,8 @@ namespace AGV.Dashboard.Services
         string SerialNumber,
         decimal X,
         decimal Y,
-        string NodeId);
+        string NodeId,
+        decimal Heading);
 
     /// <summary>Vehicle state update pushed to browsers.</summary>
     public sealed record VehicleStateDto(
@@ -16,7 +17,8 @@ namespace AGV.Dashboard.Services
         decimal SocPercent,
         bool IsCharging,
         bool IsLoaded,
-        string CurrentOrderId);
+        string CurrentOrderId,
+        string VehicleType);
 
     /// <summary>Mission counter snapshot pushed to browsers.</summary>
     public sealed record MissionCounterDto(
