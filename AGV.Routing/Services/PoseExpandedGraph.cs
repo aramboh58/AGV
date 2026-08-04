@@ -130,6 +130,9 @@ namespace AGV.Routing.Services
         /// </summary>
         public bool IsStoppable(int nodeId) => _roadMap.IsStoppable(nodeId);
 
+        public bool IsDestinationOnly(int nodeId)
+            => _roadMap.IsDestinationOnly(nodeId);
+
         /// <summary>
         /// Total number of poses in the expanded graph.
         /// Used for diagnostics and startup logging.

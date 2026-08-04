@@ -17,8 +17,8 @@
     // SVG canvas: 1400 × 420 px with 30px padding
     // ----------------------------------------------------------------
     const FACILITY = {
-        xMin: 14997, xMax: 20555,
-        yMin: 14950, yMax: 16190
+        xMin: 47288, xMax: 67745,
+        yMin: 48322, yMax: 54001
     };
 
     const SVG_W = 1400, SVG_H = 420, PAD = 30;
@@ -113,6 +113,7 @@
             v.currentX = cx;
             v.currentY = cy;
             v.currentHeading = ch;
+            v.label.setAttribute('transform', `rotate(${-svgHeading(ch)})`);
             if (t < 1) {
                 anyActive = true;
             } else {
@@ -187,7 +188,10 @@
 
         // ── Build edge speed lookup ──────────────────────────────────
         for (const edge of roadmap.edges) {
-            edgeSpeeds[`${edge.startNodeId}:${edge.endNodeId}`] = edge.speed;
+            edgeSpeeds[`${edge.startNodeId}:${edge.endNodeId}`] = {
+                speed: edge.speed,
+                distance: edge.distance
+            };
         }
 
         const crossIds = (window.dashboardConfig && window.dashboardConfig.crossCorridorMoveIds)
@@ -484,23 +488,28 @@
         }
 
         // Get speed for this segment
-        const speedKey = `${fromId}:${toId}`;
-        const speedMs = edgeSpeeds[speedKey] || 1.0; // m/s
-        const speedCmS = speedMs * 100;
-
-        // Calculate distance in facility cm
-        const fromNode = roadmap.nodes.find(n => n.nodeId === fromId);
-        const toNode = roadmap.nodes.find(n => n.nodeId === toId);
-        let distanceCm = 4000; // default
-        if (fromNode && toNode) {
-            const dx = toNode.x - fromNode.x;
-            const dy = toNode.y - fromNode.y;
-            distanceCm = Math.sqrt(dx * dx + dy * dy);
-        }
+        const edgeKey = `${fromId}:${toId}`;
+        const edgeData = edgeSpeeds[edgeKey];
 
         // Duration in ms at real speed
-        const durationMs = (distanceCm / speedCmS) * 1000;
 
+        const distanceMm = edgeData ? edgeData.distance : 4000;
+        const distanceM = distanceMm / 1000;
+        const speedMs = edgeData ? edgeData.speed : 0.5;
+
+        let durationMs;
+        if (distanceM < 0.1) {
+            // Turn-in-place move — duration based on heading change
+            const headingDelta = Math.abs(targetHeading - v.currentHeading);
+            const normalizedDelta = Math.min(headingDelta, 360 - headingDelta);
+            // Assume 3 seconds for 90 degrees
+            durationMs = Math.max(200, (normalizedDelta / 90) * 3000);
+        } else {
+            durationMs = Math.max(200, (distanceM / speedMs) * 1000);
+        }
+
+        console.log(`Move ${fromId}→${toId}: ${distanceM.toFixed(3)}m @ ${speedMs}m/s = ${durationMs.toFixed(0)}ms`);
+        console.log(`Edge ${fromId}→${toId}: edgeData=`, edgeData);
         // Calculate heading
         const heading = Math.atan2(
             -(toPos.y - fromPos.y),

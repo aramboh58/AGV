@@ -218,6 +218,10 @@ namespace AGV.Topology.Services
         public bool IsRouteable(int nodeId)
             => Nodes.TryGetValue(nodeId, out var node) && node.IsRouteable;
 
+        public bool IsDestinationOnly(int nodeId)
+            => Nodes.TryGetValue(nodeId, out var node)
+               && node.NodeType == NodeType.DestinationOnly;
+
         /// <summary>
         /// Returns all AreaIds that the specified node belongs to.
         /// Returns an empty list if the node is not a member of any area.

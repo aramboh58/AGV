@@ -14,6 +14,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
 using AGV.Dashboard.Options;
+using AGV.Core.Enums;
 
 // ----------------------------------------------------------------
 // Bootstrap Serilog early so startup errors are captured
@@ -350,45 +351,32 @@ try
         var fleetManager = app.Services
             .GetRequiredService<IFleetManager>();
 
-    //    await AGV.Tools.ExportRoadmapJson.ExportAsync(db,
-    //@"C:\Dev\AGV\AGV.Host\wwwroot\nyt_agv_roadmap.json");
+        //await AGV.Tools.ImportSiteTopology.ImportAsync(
+        //    db,
+        //    @"C:\Dev\AGV\NYT_Nodes_LeftJoin_Location.txt",
+        //    @"C:\Dev\AGV\NYT_Moves.txt");
+
+        //await AGV.Tools.ExportRoadmapJson.ExportAsync(db,
+        //    @"C:\Dev\AGV\AGV.Host\wwwroot\nyt_agv_roadmap.json");
 
         // Load press stand drop node IDs (LPS*A and UPS*A nodes)
         var pressStandNodeIds = await db.Set<AGV.Core.Entities.Node>()
-            .Where(n => n.NodeName != null && (
-                (n.NodeName.StartsWith("LPS") && n.NodeName.EndsWith("A")) ||
-                (n.NodeName.StartsWith("UPS") && n.NodeName.EndsWith("A"))))
+            .Where(n => n.NodeId >= 5000 && n.NodeId <= 6999)
             .Select(n => n.NodeId)
             .ToListAsync();
-
         simOptions.PressStandNodeIds = pressStandNodeIds;
 
         // Load staging pickup assignment IDs keyed by node name
-        var stagingAssignments = await db.Set<AGV.Core.Entities.LocationAssignment>()
-            .Join(db.Set<AGV.Core.Entities.Node>(),
-                a => a.NodeId,
-                n => n.NodeId,
-                (a, n) => new { a.AssignmentId, n.NodeName })
-            .Where(x => x.NodeName != null &&
-                x.NodeName.StartsWith("STG"))
+        var stagingAssignmentIds = await db.Set<AGV.Core.Entities.Node>()
+            .Where(n => n.NodeId >= 7300 && n.NodeId <= 7630
+                     && n.NodeType == NodeType.DestinationOnly)
+            .Select(n => n.NodeId)
             .ToListAsync();
 
         // Build press stand drop assignment lookup: NodeId -> AssignmentId
-        var dropAssignments = await db.Set<AGV.Core.Entities.LocationAssignment>()
-            .Join(db.Set<AGV.Core.Entities.Node>(),
-                a => a.NodeId,
-                n => n.NodeId,
-                (a, n) => new { a.AssignmentId, a.NodeId, n.NodeName })
-            .Where(x => x.NodeName != null && (
-                (x.NodeName.StartsWith("LPS") && x.NodeName.EndsWith("A")) ||
-                (x.NodeName.StartsWith("UPS") && x.NodeName.EndsWith("A"))))
-            .ToDictionaryAsync(x => x.NodeId, x => x.AssignmentId);
-
-        // Pick a random staging assignment for pickup
-        var stagingAssignmentIds = stagingAssignments
-            .Select(x => x.AssignmentId)
-            .ToList();
-
+        var dropAssignments = await db.Set<AGV.Core.Entities.Node>()
+            .Where(n => n.NodeId >= 5000 && n.NodeId <= 6999)
+            .ToDictionaryAsync(n => n.NodeId, n => n.NodeId);
         int missionCounter = 0;
 
         // Subscribe to RollDemanded
@@ -397,29 +385,26 @@ try
             try
             {
                 if (!dropAssignments.TryGetValue(
-                    args.PressStandNodeId, out var dropAssignmentId))
+                    args.PressStandNodeId, out var dropNodeId))
                 {
                     Log.Warning(
                         "RollDemanded: no assignment found for node {NodeId}",
                         args.PressStandNodeId);
                     return;
                 }
-
-                var pickupAssignmentId = stagingAssignmentIds[
+                var pickupNodeId = stagingAssignmentIds[
                     Math.Abs(Interlocked.Increment(ref missionCounter))
                     % stagingAssignmentIds.Count];
-
                 var context = new AGV.Core.Messages.MissionContext
                 {
                     MissionId = 0,
                     CurrentOrderId = $"ORD{Guid.NewGuid():N}"[..12]
                         .ToUpperInvariant(),
-                    PickupNodeId = pickupAssignmentId,
-                    DropNodeId = dropAssignmentId,
+                    PickupNodeId = pickupNodeId,
+                    DropNodeId = dropNodeId,
                     Priority = AGV.Core.Enums.MissionPriority.Normal,
                     CreatedAt = DateTime.UtcNow,
                 };
-
                 await fleetManager.EnqueueMissionAsync(context);
             }
             catch (Exception ex)

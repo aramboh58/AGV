@@ -38,7 +38,8 @@ namespace AGV.Tools
                     edgeId = m.MoveId,
                     startNodeId = m.FromNodeId,
                     endNodeId = m.ToNodeId,
-                    speed = m.Speed.DefaultSpeed
+                    speed = m.Speed.DefaultSpeed,
+                    distance = m.Clothoid.ArcLength
                 })
             };
 

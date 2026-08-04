@@ -293,98 +293,100 @@ namespace AGV.Fleet.Services
                 var mission = _missionQueue.Peek();
                 if (mission is null) break;
 
-                var vehicle = SelectBestVehicle(mission);
-                if (vehicle is null)
-                {
-                    // No vehicle available — stop trying for now
-                    break;
-                }
+                var candidates = SelectCandidateVehicles(mission);
+                if (candidates.Count == 0) break;
 
-                // Dequeue now that we have a vehicle
-                _missionQueue.Dequeue();
-
-                // Plan route
                 var blockedNodes = _traffic.GetLockedNodeIds();
                 var blockedMoves = _traffic.GetLockedMoveIds();
 
-                var route = await _routing.FindRouteAsync(
-                    vehicle.CurrentNodeId ?? 0,
-                    mission.PickupNodeId,
-                    vehicle.VehicleId,
-                    blockedNodes,
-                    blockedMoves,
-                    stoppingToken);
-
-                if (route is null)
+                bool dispatched = false;
+                foreach (var vehicle in candidates)
                 {
-                    _dispatchLogger.LogWarning(
-                        "No route found for vehicle {VehicleId} " +
-                        "to mission {MissionId} pickup {NodeId} — " +
-                        "re-queuing",
+                    var route = await _routing.FindRouteAsync(
+                        vehicle.CurrentNodeId ?? 0,
+                        mission.PickupNodeId,
+                        vehicle.VehicleId,
+                        blockedNodes,
+                        blockedMoves,
+                        stoppingToken);
+
+                    if (route is null)
+                    {
+                        _dispatchLogger.LogWarning(
+                            "No route found for vehicle {VehicleId} " +
+                            "to mission {MissionId} pickup {NodeId} — trying next candidate",
+                            vehicle.VehicleId,
+                            mission.MissionId,
+                            mission.PickupNodeId);
+                        continue;
+                    }
+
+                    // Route found — dequeue and dispatch
+                    _missionQueue.Dequeue();
+
+                    vehicle.AssignMission(
+                        mission.MissionId,
+                        route.Nodes.Select(n => n.NodeId).ToList().AsReadOnly());
+                    Interlocked.Increment(ref _dispatchedMissions);
+                    await _channels.MissionCounters.Writer.WriteAsync(
+                        new MissionCounterUpdate(
+                            _enqueuedMissions, _dispatchedMissions, _completedMissions,
+                            _missionQueue.Count),
+                        stoppingToken);
+                    vehicle.UpdateState(
+                        ActivityState.TravelingToPickup,
+                        OrderState.Waiting);
+                    var dispatchedMission = mission with
+                    {
+                        CurrentVehicleId = vehicle.VehicleId,
+                        CurrentOrderId = Guid.NewGuid()
+                            .ToString("N")[..8].ToUpper()
+                    };
+                    var decision = new MissionDispatchDecision
+                    {
+                        MissionId = mission.MissionId,
+                        OrderId = dispatchedMission.CurrentOrderId,
+                        VehicleId = vehicle.VehicleId,
+                        SerialNumber = vehicle.SerialNumber,
+                        RouteNodeIds = route.Nodes
+                            .Select(n => n.NodeId).ToList().AsReadOnly(),
+                        RouteMoveIds = route.MoveIds,
+                        PickupAssignmentId = mission.PickupNodeId,
+                        DropoffAssignmentId = mission.DropNodeId,
+                        EstimatedTravelTimeSeconds =
+                            route.EstimatedTravelTimeSeconds,
+                    };
+                    await _channels.DispatchDecisions.Writer
+                        .WriteAsync(decision, stoppingToken);
+                    await _channels.MissionUpdates.Writer.WriteAsync(
+                        new VehicleMissionUpdate(
+                            vehicle.VehicleId,
+                            mission.MissionId,
+                            vehicle.PlannedRouteNodeIds),
+                        stoppingToken);
+                    _dispatchLogger.LogInformation(
+                        "Dispatched vehicle {VehicleId} → " +
+                        "mission {MissionId} " +
+                        "(ETA {ETA:F0}s, route {Hops} hops)",
                         vehicle.VehicleId,
                         mission.MissionId,
-                        mission.PickupNodeId);
-                    _missionQueue.Enqueue(mission);
+                        route.EstimatedTravelTimeSeconds,
+                        route.Nodes.Count);
+
+                    dispatched = true;
                     break;
                 }
 
-                // Assign mission to vehicle
-                vehicle.AssignMission(
-                    mission.MissionId,
-                    route.Nodes.Select(n => n.NodeId).ToList().AsReadOnly());
-
-                Interlocked.Increment(ref _dispatchedMissions);
-
-                await _channels.MissionCounters.Writer.WriteAsync(
-                    new MissionCounterUpdate(
-                        _enqueuedMissions, _dispatchedMissions, _completedMissions,
-                        _missionQueue.Count),
-                    stoppingToken);
-                vehicle.UpdateState(
-                    ActivityState.TravelingToPickup,
-                    OrderState.Waiting);
-
-                var dispatched = mission with
+                if (!dispatched)
                 {
-                    CurrentVehicleId = vehicle.VehicleId,
-                    CurrentOrderId = Guid.NewGuid()
-                        .ToString("N")[..8].ToUpper()
-                };
-
-                // Publish dispatch decision
-                var decision = new MissionDispatchDecision
-                {
-                    MissionId = mission.MissionId,
-                    OrderId = dispatched.CurrentOrderId,
-                    VehicleId = vehicle.VehicleId,
-                    SerialNumber = vehicle.SerialNumber,
-                    RouteNodeIds = route.Nodes
-                        .Select(n => n.NodeId).ToList().AsReadOnly(),
-                    RouteMoveIds = route.MoveIds,
-                    PickupAssignmentId = mission.PickupNodeId,
-                    DropoffAssignmentId = mission.DropNodeId,
-                    EstimatedTravelTimeSeconds =
-                        route.EstimatedTravelTimeSeconds,
-                };
-
-                await _channels.DispatchDecisions.Writer
-                    .WriteAsync(decision, stoppingToken);
-
-                await _channels.MissionUpdates.Writer.WriteAsync(
-                    new VehicleMissionUpdate(
-                        vehicle.VehicleId,
+                    _dispatchLogger.LogWarning(
+                        "No vehicle could route to mission {MissionId} pickup {NodeId} — re-queuing",
                         mission.MissionId,
-                        vehicle.PlannedRouteNodeIds),
-                    stoppingToken);
-
-                _dispatchLogger.LogInformation(
-                    "Dispatched vehicle {VehicleId} → " +
-                    "mission {MissionId} " +
-                    "(ETA {ETA:F0}s, route {Hops} hops)",
-                    vehicle.VehicleId,
-                    mission.MissionId,
-                    route.EstimatedTravelTimeSeconds,
-                    route.Nodes.Count);
+                        mission.PickupNodeId);
+                    _missionQueue.Dequeue();
+                    _missionQueue.Enqueue(mission);
+                    break;
+                }
             }
         }
 
@@ -550,29 +552,22 @@ namespace AGV.Fleet.Services
         // Vehicle selection
         // ----------------------------------------------------------------
 
-        private Vehicle? SelectBestVehicle(MissionContext mission)
+        private List<Vehicle> SelectCandidateVehicles(MissionContext mission)
         {
             var candidates = _registry.GetAvailableForDispatch()
-                .Where(v => !v.BatteryStateOfCharge
-                    .Equals(_charging.GetThresholds().MandatoryEnterSoc)
-                    && v.BatteryStateOfCharge >
+                .Where(v => v.BatteryStateOfCharge >
                     _charging.GetThresholds().MandatoryEnterSoc)
                 .ToList();
 
             _logger.LogInformation(
-                "SelectBestVehicle: {Total} registered, {Available} available for dispatch, {Candidates} above SOC threshold",
+                "SelectCandidateVehicles: {Total} registered, {Available} available for dispatch, {Candidates} above SOC threshold",
                 _registry.Count,
                 _registry.GetAvailableForDispatch().Count,
                 candidates.Count);
 
-            if (candidates.Count == 0) return null;
-
-            // Select closest vehicle by current node proximity
-            // Full travel-time based selection in Phase 2 order stealing
-            var pickupNodeId = mission.PickupNodeId;
             return candidates
                 .OrderByDescending(v => v.BatteryStateOfCharge)
-                .FirstOrDefault();
+                .ToList();
         }
 
         // ----------------------------------------------------------------
