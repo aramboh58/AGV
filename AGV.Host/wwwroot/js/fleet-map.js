@@ -114,11 +114,18 @@
             v.currentY = cy;
             v.currentHeading = ch;
             v.label.setAttribute('transform', `rotate(${-svgHeading(ch)})`);
+
             if (t < 1) {
                 anyActive = true;
             } else {
                 if (target.onComplete) target.onComplete();
-                delete animTargets[vid];
+                if (animTargets[vid] === target) {
+                    // onComplete didn't schedule a new move — safe to clear
+                    delete animTargets[vid];
+                } else if (animTargets[vid]) {
+                    // onComplete scheduled a new move — keep the loop alive for it
+                    anyActive = true;
+                }
             }
         }
         if (anyActive) {
@@ -269,9 +276,10 @@
                 currentY: -100,
                 currentHeading: 0,
                 vehicleType: 'Fork',
-                routeNodeIds: [],      // planned route
-                routeIndex: 0,         // current position in route
-                routeActive: false,    // dead-reckoning active
+                routeNodeIds: [],
+                routeIndex: 0,
+                routeActive: false,
+                routeVersion: 0,
             };
         }
 
@@ -333,12 +341,7 @@
 
             // If dead-reckoning is active, use server position as sync correction
             if (v.routeActive && nodeId) {
-                const parsedNodeId = parseInt(nodeId);
-                const idx = v.routeNodeIds.indexOf(parsedNodeId);
-                if (idx >= 0 && idx > v.routeIndex) {
-                    v.routeIndex = idx;
-                }
-                return; // let dead-reckoning drive the animation
+                return;
             }
 
             // Non-dead-reckoning path (idle, charging, etc.)
@@ -420,19 +423,61 @@
         setVehicleRoute: function (vehicleId, routeNodeIds) {
             const v = vehicles[vehicleId];
             if (!v) return;
-
             if (!routeNodeIds || routeNodeIds.length === 0) {
                 v.routeNodeIds = [];
                 v.routeIndex = 0;
                 v.routeActive = false;
+                delete animTargets[vehicleId];
+                v.routeVersion = (v.routeVersion || 0) + 1;
+                console.log(`V${vehicleId} setVehicleRoute: 0 nodes, version now ${v.routeVersion}`);
                 return;
             }
-
+            delete animTargets[vehicleId];
+            v.routeVersion = (v.routeVersion || 0) + 1;
+            console.log(`V${vehicleId} setVehicleRoute: ${routeNodeIds.length} nodes, version now ${v.routeVersion}`);
+            const firstNodeId = routeNodeIds[0];
+            const firstPos = nodePositions[firstNodeId];
             v.routeNodeIds = routeNodeIds;
             v.routeIndex = 0;
             v.routeActive = true;
+            if (firstPos) {
+                const dx = v.currentX - firstPos.x;
+                const dy = v.currentY - firstPos.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
 
-            // Start dead-reckoning from current position
+                // ADDED LOG LINE — right here, before the branch decision:
+                console.log(`V${vehicleId} route-start gap: dist=${dist.toFixed(1)}px from (${v.currentX.toFixed(0)},${v.currentY.toFixed(0)}) to firstNode=${firstNodeId}(${firstPos.x.toFixed(0)},${firstPos.y.toFixed(0)})`);
+
+                if (dist > 2 && dist < 50) {
+                    // Short gap — bridge smoothly
+                    const distanceM = dist * ((FACILITY.xMax - FACILITY.xMin) / 100 / DRAW_W);
+                    const bridgeDuration = Math.min(distanceM / 0.7 * 1000, 10000);
+                    const routeVersion = v.routeVersion;
+                    animTargets[vehicleId] = {
+                        targetX: firstPos.x,
+                        targetY: firstPos.y,
+                        targetHeading: v.currentHeading,
+                        startX: v.currentX,
+                        startY: v.currentY,
+                        startHeading: v.currentHeading,
+                        startTime: performance.now(),
+                        duration: bridgeDuration,
+                        onComplete: function () {
+                            if (v.routeVersion !== routeVersion) return;
+                            v.currentX = firstPos.x;
+                            v.currentY = firstPos.y;
+                            scheduleNextMove(vehicleId);
+                        }
+                    };
+                    startAnimLoop();
+                    return;
+                }
+                // Large gap or already close — snap
+                v.currentX = firstPos.x;
+                v.currentY = firstPos.y;
+                v.group.setAttribute('transform',
+                    `translate(${firstPos.x},${firstPos.y}) rotate(${svgHeading(v.currentHeading)})`);
+            }
             scheduleNextMove(vehicleId);
         },
     };
@@ -470,6 +515,9 @@
 
     function scheduleNextMove(vehicleId) {
         const v = vehicles[vehicleId];
+
+        console.log(`V${vehicleId} scheduleNextMove: index=${v.routeIndex}/${v.routeNodeIds.length} active=${v.routeActive} version=${v.routeVersion}`);
+
         if (!v || !v.routeActive) return;
         if (v.routeIndex >= v.routeNodeIds.length - 1) {
             v.routeActive = false;
@@ -482,40 +530,36 @@
         const toPos = nodePositions[toId];
 
         if (!fromPos || !toPos) {
+            console.log(`V${vehicleId} missing node position: from=${fromId}(${!!fromPos}) to=${toId}(${!!toPos}) — skipping`);
             v.routeIndex++;
             scheduleNextMove(vehicleId);
             return;
         }
 
-        // Get speed for this segment
         const edgeKey = `${fromId}:${toId}`;
         const edgeData = edgeSpeeds[edgeKey];
 
-        // Duration in ms at real speed
-
-        const distanceMm = edgeData ? edgeData.distance : 4000;
-        const distanceM = distanceMm / 1000;
+        const distanceCm = edgeData ? edgeData.distance : 400;
+        const distanceM = distanceCm / 100;
         const speedMs = edgeData ? edgeData.speed : 0.5;
+
+        const heading = Math.atan2(
+            -(toPos.y - fromPos.y),
+            toPos.x - fromPos.x) * 180 / Math.PI;
 
         let durationMs;
         if (distanceM < 0.1) {
-            // Turn-in-place move — duration based on heading change
-            const headingDelta = Math.abs(targetHeading - v.currentHeading);
+            const headingDelta = Math.abs(heading - v.currentHeading);
             const normalizedDelta = Math.min(headingDelta, 360 - headingDelta);
-            // Assume 3 seconds for 90 degrees
             durationMs = Math.max(200, (normalizedDelta / 90) * 3000);
         } else {
             durationMs = Math.max(200, (distanceM / speedMs) * 1000);
         }
 
-        console.log(`Move ${fromId}→${toId}: ${distanceM.toFixed(3)}m @ ${speedMs}m/s = ${durationMs.toFixed(0)}ms`);
-        console.log(`Edge ${fromId}→${toId}: edgeData=`, edgeData);
-        // Calculate heading
-        const heading = Math.atan2(
-            -(toPos.y - fromPos.y),
-            toPos.x - fromPos.x) * 180 / Math.PI;
+        console.log(`V${vehicleId} move ${fromId}→${toId}: ${distanceM.toFixed(3)}m @ ${speedMs}m/s = ${durationMs.toFixed(0)}ms`);
 
-        // Animate this segment
+        const routeVersion = v.routeVersion;
+
         animTargets[vehicleId] = {
             targetX: toPos.x,
             targetY: toPos.y,
@@ -526,6 +570,7 @@
             startTime: performance.now(),
             duration: durationMs,
             onComplete: function () {
+                if (v.routeVersion !== routeVersion) return;
                 v.routeIndex++;
                 scheduleNextMove(vehicleId);
             }
@@ -539,7 +584,6 @@
     // ----------------------------------------------------------------
     document.addEventListener('click', function (e) {
         const target = e.target;
-        console.log('Click target:', target.tagName, target.className, target.getAttribute('data-vid'));
 
         const group = target.closest('.vehicle-group');
         if (group) {

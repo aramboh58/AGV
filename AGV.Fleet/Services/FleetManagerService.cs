@@ -324,6 +324,12 @@ namespace AGV.Fleet.Services
                     // Route found — dequeue and dispatch
                     _missionQueue.Dequeue();
 
+                    _dispatchLogger.LogInformation(
+                        "Dispatching vehicle {VehicleId} from node {NodeId} to pickup {PickupNodeId}",
+                        vehicle.VehicleId,
+                        vehicle.CurrentNodeId,
+                        mission.PickupNodeId);
+
                     vehicle.AssignMission(
                         mission.MissionId,
                         route.Nodes.Select(n => n.NodeId).ToList().AsReadOnly());

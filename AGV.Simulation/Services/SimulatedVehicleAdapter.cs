@@ -76,14 +76,30 @@ namespace AGV.Simulation.Services
         // ----------------------------------------------------------------
 
         public Task SendOrderAsync(
-            string serialNumber,
-            VehicleOrder order,
-            CancellationToken cancellationToken = default)
+    string serialNumber,
+    VehicleOrder order,
+    CancellationToken cancellationToken = default)
         {
             var state = GetSimStateBySerial(serialNumber);
             if (state is null) return Task.CompletedTask;
 
-            // Store the order for the simulation engine to execute
+            if (state.PendingOrder is not null
+                && state.CurrentOrderId != order.OrderId
+                && state.NodeIndex < state.PendingOrder.Nodes.Count(n => n.Released) - 1)
+            {
+                _logger.LogWarning(
+                    "SendOrderAsync OVERWRITE: {Serial} had order {OldOrder} " +
+                    "at NodeIndex={Idx}/{Total} — replaced by {NewOrder} before completion",
+                    serialNumber, state.CurrentOrderId, state.NodeIndex,
+                    state.PendingOrder.Nodes.Count(n => n.Released),
+                    order.OrderId);
+            }
+
+            _logger.LogInformation(
+                "SendOrderAsync: {Serial} order {OrderId} — {NodeCount} nodes, {ReleasedCount} released",
+                serialNumber, order.OrderId, order.Nodes.Count,
+                order.Nodes.Count(n => n.Released));
+
             state.PendingOrder = order;
             state.CurrentOrderId = order.OrderId;
 
@@ -336,9 +352,9 @@ namespace AGV.Simulation.Services
         }
 
         private async Task AdvanceTravelAsync(
-            SimulatedVehicleState state,
-            decimal elapsedSeconds,
-            CancellationToken cancellationToken)
+    SimulatedVehicleState state,
+    decimal elapsedSeconds,
+    CancellationToken cancellationToken)
         {
             var order = state.PendingOrder;
             if (order is null) return;
@@ -357,9 +373,11 @@ namespace AGV.Simulation.Services
                     if (int.TryParse(lastNode.NodeId,
                         out var nodeId))
                     {
+                        // Local sim tracking only. vehicle.CurrentNodeId is
+                        // updated exclusively via ProcessVehicleStateUpdateAsync
+                        // consuming the channel — single ownership, same path
+                        // a real MQTT-connected vehicle's position would take.
                         state.CurrentNodeId = nodeId;
-                        state.Vehicle.UpdatePosition(
-                            nodeId, state.Vehicle.CurrentMapId);
                     }
                 }
 
@@ -401,10 +419,6 @@ namespace AGV.Simulation.Services
                 return;
             }
 
-            // Advance along route
-            state.TravelProgress += (double)elapsedSeconds
-                * SimulationConstants.DefaultSpeedCmPerSec;
-
             // Check if we've reached the next node
             var currentNode = releasedNodes[state.NodeIndex];
             var nextNode = releasedNodes[state.NodeIndex + 1];
@@ -413,6 +427,14 @@ namespace AGV.Simulation.Services
                 && int.TryParse(nextNode.NodeId, out var toId))
             {
                 var move = RoadMap.GetMove(fromId, toId);
+
+                // Use actual move speed instead of fixed constant
+                var speedCmPerSec = move is not null
+                    ? (double)move.Speed.DefaultSpeed * 100.0
+                    : SimulationConstants.DefaultSpeedCmPerSec;
+
+                state.TravelProgress += (double)elapsedSeconds * speedCmPerSec;
+
                 var segmentLengthCm = move is not null
                     ? (double)move.Clothoid.ArcLength
                     : SimulationConstants.DefaultSegmentLengthCm;
@@ -421,9 +443,9 @@ namespace AGV.Simulation.Services
                 {
                     state.TravelProgress -= segmentLengthCm;
                     state.NodeIndex++;
+
+                    // Local sim tracking only — see note above.
                     state.CurrentNodeId = toId;
-                    state.Vehicle.UpdatePosition(
-                        toId, state.Vehicle.CurrentMapId);
 
                     // Update heading to move's end heading
                     if (move is not null)
