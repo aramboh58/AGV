@@ -44,6 +44,9 @@ namespace AGV.Dashboard.Services
         private int _tickCount;
         private DateTime _simStartTime = DateTime.UtcNow;
 
+        private int? _selectedVehicleId;
+        private readonly object _selectionLock = new();
+
         public DashboardBroadcaster(
             IHubContext<FleetHub> hub,
             ChannelRegistry channels,
@@ -71,7 +74,8 @@ namespace AGV.Dashboard.Services
                 BroadcastMissionCountersAsync(stoppingToken),
                 BroadcastSimClockAsync(stoppingToken),
                 BroadcastAlertsAsync(stoppingToken),
-                BroadcastMissionUpdatesAsync(stoppingToken)); ;
+                BroadcastMissionUpdatesAsync(stoppingToken),
+                BroadcastSelectedVehicleDetailAsync(stoppingToken));
         }
 
         // ----------------------------------------------------------------
@@ -190,6 +194,11 @@ namespace AGV.Dashboard.Services
             _speedFactor = speedFactor;
             Interlocked.Add(ref _enqueued, enqueuedDelta);
         }
+        public void SetSelectedVehicle(int? vehicleId)
+        {
+            lock (_selectionLock) { _selectedVehicleId = vehicleId; }
+        }
+
         private async Task BroadcastSimClockAsync(CancellationToken ct)
         {
             await foreach (var update in
@@ -280,6 +289,32 @@ namespace AGV.Dashboard.Services
                 vehicle.PlannedRouteNodeIds.ToList(),
                 vehicle.CurrentNodeId,
                 socPoints);
+        }
+
+        private async Task BroadcastSelectedVehicleDetailAsync(CancellationToken ct)
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(500, ct);
+
+                    int? vehicleId;
+                    lock (_selectionLock) { vehicleId = _selectedVehicleId; }
+
+                    if (vehicleId.HasValue)
+                    {
+                        var detail = GetVehicleDetail(vehicleId.Value);
+                        if (detail is not null)
+                            await _hub.Clients.All.SendAsync("UpdateVehicleDetail", detail, ct);
+                    }
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error broadcasting selected vehicle detail");
+                }
+            }
         }
         private async Task BroadcastMissionUpdatesAsync(CancellationToken ct)
         {

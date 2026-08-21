@@ -597,9 +597,9 @@
         }
 
         if (target.classList.contains('popup-close')) {
-            setTimeout(function () {
+            setTimeout(async function () {
                 if (window.fleetMap._dotNetRef)
-                    window.fleetMap._dotNetRef.invokeMethodAsync('ClosePopup');
+                    await window.fleetMap._dotNetRef.invokeMethodAsync('ClosePopup');
             }, 0);
             return;
         }

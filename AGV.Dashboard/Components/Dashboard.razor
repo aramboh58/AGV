@@ -434,9 +434,11 @@
     }
 
     [JSInvokable]
-    public void ClosePopup()
+    public async Task ClosePopup()
     {
         _selectedVehicle = null;
-        InvokeAsync(StateHasChanged);
+        if (_hub is not null)
+            await _hub.SendAsync("ClearVehicleDetail");
+        await InvokeAsync(StateHasChanged);
     }
 }

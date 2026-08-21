@@ -19,8 +19,15 @@ namespace AGV.Dashboard.Hubs
 
         public async Task RequestVehicleDetail(int vehicleId)
         {
+            _broadcaster.SetSelectedVehicle(vehicleId);   // start continuous tracking
             var detail = _broadcaster.GetVehicleDetail(vehicleId);
-            await Clients.Caller.SendAsync("UpdateVehicleDetail", detail);
+            await Clients.Caller.SendAsync("UpdateVehicleDetail", detail);  // instant first paint
+        }
+
+        public Task ClearVehicleDetail()
+        {
+            _broadcaster.SetSelectedVehicle(null);
+            return Task.CompletedTask;
         }
     }
 }
