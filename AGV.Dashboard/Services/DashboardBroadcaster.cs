@@ -20,7 +20,8 @@ namespace AGV.Dashboard.Services
     /// browser clients via FleetHub.
     ///
     /// Also tracks mission counters and simulation clock for the
-    /// dashboard counters panel.
+    /// dashboard counters panel, and streams live detail for whichever
+    /// vehicle currently has its popup open.
     /// </summary>
     public sealed class DashboardBroadcaster : BackgroundService
     {
@@ -44,6 +45,9 @@ namespace AGV.Dashboard.Services
         private int _tickCount;
         private DateTime _simStartTime = DateTime.UtcNow;
 
+        // Currently selected vehicle for live popup detail streaming.
+        // Set via SetSelectedVehicle (called from FleetHub.RequestVehicleDetail
+        // and cleared via FleetHub.ClearVehicleDetail on popup close).
         private int? _selectedVehicleId;
         private readonly object _selectionLock = new();
 
@@ -123,47 +127,90 @@ namespace AGV.Dashboard.Services
         }
 
         // ----------------------------------------------------------------
-        // State updates — activity, SOC, order state
+        // State updates — activity, SOC, order state.
+        //
+        // Throttled/batched the same way as positions (was previously
+        // unthrottled — every single incoming update was individually
+        // re-broadcast and triggered a full client-side StateHasChanged
+        // re-render of the whole 20-card fleet grid, up to ~20x/sec
+        // sustained. Suspected root cause of: multi-minute lag between
+        // vehicle click and popup appearing, intermittent SignalR
+        // disconnects/reconnect overlay, and vehicles continuing to
+        // animate client-side after server shutdown (backlog of queued
+        // JS interop calls draining after the fact). Collapsing to
+        // latest-per-vehicle and flushing at a bounded rate cuts the
+        // render-triggering load by roughly the vehicle count.
         // ----------------------------------------------------------------
 
         private async Task BroadcastStatesAsync(
             CancellationToken ct)
         {
-            await foreach (var update in
-                _channels.DashboardStateUpdates.Reader.ReadAllAsync(ct))
+            var latest = new Dictionary<int, VehicleStateDto>();
+
+            var drainTask = Task.Run(async () =>
+            {
+                await foreach (var update in
+                    _channels.DashboardStateUpdates.Reader.ReadAllAsync(ct))
+                {
+                    try
+                    {
+                        if (!_socHistory.ContainsKey(update.VehicleId))
+                            _socHistory[update.VehicleId] = new Queue<(DateTime, decimal)>();
+
+                        var history = _socHistory[update.VehicleId];
+                        history.Enqueue((DateTime.UtcNow, update.BatteryStateOfCharge));
+                        if (history.Count > SocHistoryMaxPoints)
+                            history.Dequeue();
+
+                        var dto = new VehicleStateDto(
+                            update.VehicleId,
+                            update.SerialNumber,
+                            update.ActivityState.ToString(),
+                            update.BatteryStateOfCharge,
+                            update.IsCharging,
+                            update.IsLoaded,
+                            update.CurrentOrderId ?? string.Empty,
+                            update.VehicleType);
+
+                        lock (latest) { latest[update.VehicleId] = dto; }
+                    }
+                    catch (OperationCanceledException) { break; }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "Error processing state update");
+                    }
+                }
+            }, ct);
+
+            while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    if (!_socHistory.ContainsKey(update.VehicleId))
-                        _socHistory[update.VehicleId] = new Queue<(DateTime, decimal)>();
+                    await Task.Delay(250, ct); // 4 times per second — matches positions
 
-                    var history = _socHistory[update.VehicleId];
-                    history.Enqueue((DateTime.UtcNow, update.BatteryStateOfCharge));
-                    if (history.Count > SocHistoryMaxPoints)
-                        history.Dequeue();
-                    
-                    _logger.LogInformation("OrderState: {OrderState}", update.OrderState);
+                    List<VehicleStateDto> toSend;
+                    lock (latest)
+                    {
+                        if (latest.Count == 0) continue;
+                        toSend = latest.Values.ToList();
+                        latest.Clear();
+                    }
 
-                    var dto = new VehicleStateDto(
-                        update.VehicleId,
-                        update.SerialNumber,
-                        update.ActivityState.ToString(),
-                        update.BatteryStateOfCharge,
-                        update.IsCharging,
-                        update.IsLoaded,
-                        update.CurrentOrderId ?? string.Empty,
-                        update.VehicleType);
-
-                    await _hub.Clients.All.SendAsync(
-                        "UpdateVehicleState", dto, ct);
+                    foreach (var dto in toSend)
+                    {
+                        await _hub.Clients.All.SendAsync(
+                            "UpdateVehicleState", dto, ct);
+                    }
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex,
-                        "Error broadcasting state update");
+                    _logger.LogWarning(ex, "Error broadcasting state update");
                 }
             }
+
+            await drainTask;
         }
 
         // ----------------------------------------------------------------
@@ -194,6 +241,12 @@ namespace AGV.Dashboard.Services
             _speedFactor = speedFactor;
             Interlocked.Add(ref _enqueued, enqueuedDelta);
         }
+
+        // ----------------------------------------------------------------
+        // Selected-vehicle tracking — called by FleetHub on popup
+        // open (RequestVehicleDetail) and close (ClearVehicleDetail).
+        // ----------------------------------------------------------------
+
         public void SetSelectedVehicle(int? vehicleId)
         {
             lock (_selectionLock) { _selectedVehicleId = vehicleId; }
@@ -291,13 +344,19 @@ namespace AGV.Dashboard.Services
                 socPoints);
         }
 
+        // ----------------------------------------------------------------
+        // Live popup streaming — pushes UpdateVehicleDetail at 2Hz for
+        // whichever single vehicle is currently selected (popup open).
+        // No-op when no popup is open, so this costs nothing at rest.
+        // ----------------------------------------------------------------
+
         private async Task BroadcastSelectedVehicleDetailAsync(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(500, ct);
+                    await Task.Delay(500, ct); // 2 times per second
 
                     int? vehicleId;
                     lock (_selectionLock) { vehicleId = _selectedVehicleId; }
@@ -306,16 +365,19 @@ namespace AGV.Dashboard.Services
                     {
                         var detail = GetVehicleDetail(vehicleId.Value);
                         if (detail is not null)
-                            await _hub.Clients.All.SendAsync("UpdateVehicleDetail", detail, ct);
+                            await _hub.Clients.All.SendAsync(
+                                "UpdateVehicleDetail", detail, ct);
                     }
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error broadcasting selected vehicle detail");
+                    _logger.LogWarning(ex,
+                        "Error broadcasting selected vehicle detail");
                 }
             }
         }
+
         private async Task BroadcastMissionUpdatesAsync(CancellationToken ct)
         {
             await foreach (var update in
