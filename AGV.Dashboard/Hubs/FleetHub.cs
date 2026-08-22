@@ -11,17 +11,21 @@ namespace AGV.Dashboard.Hubs
     public sealed class FleetHub : Hub
     {
         private readonly DashboardBroadcaster _broadcaster;
+        private readonly ILogger<FleetHub> _logger;
 
-        public FleetHub(DashboardBroadcaster broadcaster)
+        public FleetHub(DashboardBroadcaster broadcaster, ILogger<FleetHub> logger)
         {
             _broadcaster = broadcaster;
+            _logger = logger;
         }
 
         public async Task RequestVehicleDetail(int vehicleId)
         {
-            _broadcaster.SetSelectedVehicle(vehicleId);   // start continuous tracking
+            _logger.LogInformation("RequestVehicleDetail ENTER: V{VehicleId}", vehicleId);
+            _broadcaster.SetSelectedVehicle(vehicleId);
             var detail = _broadcaster.GetVehicleDetail(vehicleId);
-            await Clients.Caller.SendAsync("UpdateVehicleDetail", detail);  // instant first paint
+            await Clients.Caller.SendAsync("UpdateVehicleDetail", detail);
+            _logger.LogInformation("RequestVehicleDetail EXIT: V{VehicleId}", vehicleId);
         }
 
         public Task ClearVehicleDetail()

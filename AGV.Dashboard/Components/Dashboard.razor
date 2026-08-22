@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject VehicleRegistry VehicleRegistry
 @inject IJSRuntime JS
+@inject ILogger<Dashboard> Logger
 @implements IAsyncDisposable
 
 <div class="dashboard">
@@ -207,24 +208,29 @@
             .WithAutomaticReconnect()
             .Build();
 
-        _hub.On<VehicleStatePayload>("UpdateVehicleState", state =>
-    {
-    _vehicleStates[state.VehicleId] = new VehicleDisplayState
+        // Batched: one message per flush cycle carrying a list of every
+        // vehicle whose state changed, instead of one message per vehicle.
+        // A single JS interop call and a single StateHasChanged handle
+        // the whole batch, regardless of how many vehicles are in it.
+        _hub.On<List<VehicleStatePayload>>("UpdateVehicleStates", batch =>
         {
-            VehicleId = state.VehicleId,
-            SerialNumber = state.SerialNumber,
-            ActivityState = state.ActivityState,
-            SocPercent = state.SocPercent,
-            IsCharging = state.IsCharging,
-            IsLoaded = state.IsLoaded,
-            VehicleType = state.VehicleType,
-        };
-        // Also update JS map
-        Task.Run(() => JS.InvokeVoidAsync(
-            "fleetMap.updateState", state.VehicleId,
-            state.ActivityState, state.VehicleType));
-        InvokeAsync(StateHasChanged);
-    });
+            foreach (var state in batch)
+            {
+                _vehicleStates[state.VehicleId] = new VehicleDisplayState
+                {
+                    VehicleId = state.VehicleId,
+                    SerialNumber = state.SerialNumber,
+                    ActivityState = state.ActivityState,
+                    SocPercent = state.SocPercent,
+                    IsCharging = state.IsCharging,
+                    IsLoaded = state.IsLoaded,
+                    VehicleType = state.VehicleType,
+                };
+            }
+            // Also update JS map — one batched interop call for the whole list
+            Task.Run(() => JS.InvokeVoidAsync("fleetMap.updateStates", batch));
+            InvokeAsync(StateHasChanged);
+        });
 
         _hub.On<MissionCounterPayload>("UpdateMissionCounters", counters =>
         {
@@ -235,15 +241,13 @@
         InvokeAsync(StateHasChanged);
         });
 
-        // Position updates go straight to JS for smooth SVG animation
-        _hub.On<VehiclePositionPayload>("UpdateVehiclePosition", pos =>
+        // Position updates go straight to JS for smooth SVG animation.
+        // Batched: one message per flush cycle carrying a list, one
+        // interop call per batch instead of one per vehicle. No
+        // StateHasChanged here — positions never touched C#-side state.
+        _hub.On<List<VehiclePositionPayload>>("UpdateVehiclePositions", batch =>
         {
-            var id = pos.VehicleId;
-            var x = (double)pos.X;
-            var y = (double)pos.Y;
-            var nodeId = pos.NodeId;
-            var heading = (double)pos.Heading;
-            Task.Run(() => JS.InvokeVoidAsync("fleetMap.updatePosition", id, x, y, nodeId, heading));
+            Task.Run(() => JS.InvokeVoidAsync("fleetMap.updatePositions", batch));
         });
 
         // Update the simulation clock
@@ -264,9 +268,9 @@
 
         _hub.On<VehicleDetailPayload>("UpdateVehicleDetail", detail =>
         {
-        //Console.WriteLine($"UpdateVehicleDetail received: V{detail.VehicleId}");
-        _selectedVehicle = detail;
-        InvokeAsync(StateHasChanged);
+            Logger.LogInformation("UpdateVehicleDetail received: V{VehicleId}", detail.VehicleId);
+            _selectedVehicle = detail;
+            InvokeAsync(StateHasChanged);
         });
 
         _hub.On<VehicleMissionPayload>("UpdateVehicleMission", mission =>
@@ -428,9 +432,10 @@
     [JSInvokable]
     public async Task OnVehicleClicked(int vehicleId)
     {
-        //Console.WriteLine($"OnVehicleClicked: {vehicleId}");
+        Logger.LogInformation("OnVehicleClicked ENTER: V{VehicleId}", vehicleId);
         if (_hub is not null)
             await _hub.SendAsync("RequestVehicleDetail", vehicleId);
+        Logger.LogInformation("OnVehicleClicked EXIT: V{VehicleId}", vehicleId);
     }
 
     [JSInvokable]

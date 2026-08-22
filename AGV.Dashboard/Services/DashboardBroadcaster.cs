@@ -22,6 +22,16 @@ namespace AGV.Dashboard.Services
     /// Also tracks mission counters and simulation clock for the
     /// dashboard counters panel, and streams live detail for whichever
     /// vehicle currently has its popup open.
+    ///
+    /// Positions and states are each sent as a single batched list per
+    /// flush cycle (not one message per vehicle) — see UpdateVehicleStates
+    /// / UpdateVehiclePositions below. Sending N individual messages per
+    /// flush cycle (one per changed vehicle) was found to cause a tight
+    /// burst of SignalR deliveries — each triggering its own client-side
+    /// JS interop call and, for states, its own full-component
+    /// StateHasChanged render — that could back up the browser's single
+    /// main-thread message queue badly enough to noticeably delay
+    /// unrelated messages (e.g. vehicle popup detail) queued behind them.
     /// </summary>
     public sealed class DashboardBroadcaster : BackgroundService
     {
@@ -83,7 +93,10 @@ namespace AGV.Dashboard.Services
         }
 
         // ----------------------------------------------------------------
-        // Position updates — high frequency, direct from sim tick
+        // Position updates — high frequency, direct from sim tick.
+        // Batched: one "UpdateVehiclePositions" message per flush cycle
+        // carrying a list, not one "UpdateVehiclePosition" message per
+        // vehicle.
         // ----------------------------------------------------------------
 
         private async Task BroadcastPositionsAsync(CancellationToken ct)
@@ -109,14 +122,12 @@ namespace AGV.Dashboard.Services
                             update.Heading);
                     }
 
-                    // Broadcast latest position for each vehicle
-                    foreach (var dto in latest.Values)
+                    if (latest.Count > 0)
                     {
                         await _hub.Clients.All.SendAsync(
-                            "UpdateVehiclePosition", dto, ct);
+                            "UpdateVehiclePositions", latest.Values.ToList(), ct);
+                        latest.Clear();
                     }
-
-                    latest.Clear();
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
@@ -129,17 +140,11 @@ namespace AGV.Dashboard.Services
         // ----------------------------------------------------------------
         // State updates — activity, SOC, order state.
         //
-        // Throttled/batched the same way as positions (was previously
-        // unthrottled — every single incoming update was individually
-        // re-broadcast and triggered a full client-side StateHasChanged
-        // re-render of the whole 20-card fleet grid, up to ~20x/sec
-        // sustained. Suspected root cause of: multi-minute lag between
-        // vehicle click and popup appearing, intermittent SignalR
-        // disconnects/reconnect overlay, and vehicles continuing to
-        // animate client-side after server shutdown (backlog of queued
-        // JS interop calls draining after the fact). Collapsing to
-        // latest-per-vehicle and flushing at a bounded rate cuts the
-        // render-triggering load by roughly the vehicle count.
+        // Batched: one "UpdateVehicleStates" message per flush cycle
+        // carrying a list, not one "UpdateVehicleState" message per
+        // vehicle. A background drain task collapses incoming updates
+        // to latest-per-vehicle; a separate loop flushes that at a
+        // bounded 4Hz as a single message.
         // ----------------------------------------------------------------
 
         private async Task BroadcastStatesAsync(
@@ -197,11 +202,8 @@ namespace AGV.Dashboard.Services
                         latest.Clear();
                     }
 
-                    foreach (var dto in toSend)
-                    {
-                        await _hub.Clients.All.SendAsync(
-                            "UpdateVehicleState", dto, ct);
-                    }
+                    await _hub.Clients.All.SendAsync(
+                        "UpdateVehicleStates", toSend, ct);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)

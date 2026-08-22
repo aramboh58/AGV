@@ -12,6 +12,16 @@
     'use strict';
 
     // ----------------------------------------------------------------
+    // Debug logging toggle
+    // Set to true to re-enable the high-frequency per-move/per-route
+    // console logging used during teleport/stall diagnosis. Left false
+    // by default — this logging fires dozens of times per vehicle per
+    // route, continuously, and is a real (client-side, main-thread)
+    // cost that unthrottled server-side broadcasts previously masked.
+    // ----------------------------------------------------------------
+    const DEBUG_VERBOSE = false;
+
+    // ----------------------------------------------------------------
     // Coordinate mapping
     // Facility: X 466–680 ft, Y 478–542 ft  (Y increases north in DXF)
     // SVG canvas: 1400 × 420 px with 30px padding
@@ -329,77 +339,116 @@
     }
 
     // ----------------------------------------------------------------
+    // Internal per-vehicle update logic.
+    // Both the single-item public functions (updatePosition/updateState)
+    // and the batched public functions (updatePositions/updateStates)
+    // call these — batching only changes how many times we cross the
+    // JS interop boundary and how many DOM updates happen per call,
+    // not the per-vehicle logic itself.
+    // ----------------------------------------------------------------
+
+    function applyPositionUpdate(vehicleId, x, y, nodeId, heading) {
+        const v = vehicles[vehicleId];
+        if (!v) return;
+
+        // If dead-reckoning is active, use server position as sync correction
+        if (v.routeActive && nodeId) {
+            return;
+        }
+
+        // Non-dead-reckoning path (idle, charging, etc.)
+        let targetX, targetY;
+        let targetHeading = heading !== undefined ? heading : v.currentHeading;
+
+        if (nodeId && nodePositions[parseInt(nodeId)]) {
+            targetX = nodePositions[parseInt(nodeId)].x;
+            targetY = nodePositions[parseInt(nodeId)].y;
+        } else if (x != null && y != null) {
+            targetX = toSvgX(parseFloat(x));
+            targetY = toSvgY(parseFloat(y));
+        } else {
+            return;
+        }
+
+        if (!v.positioned) {
+            v.group.setAttribute('transform',
+                `translate(${targetX},${targetY}) rotate(${svgHeading(targetHeading)})`);
+            v.currentX = targetX;
+            v.currentY = targetY;
+            v.currentHeading = targetHeading;
+            v.positioned = true;
+            return;
+        }
+
+        animTargets[vehicleId] = {
+            targetX, targetY, targetHeading,
+            startX: v.currentX,
+            startY: v.currentY,
+            startHeading: v.currentHeading,
+            startTime: performance.now(),
+            duration: 250
+        };
+
+        startAnimLoop();
+    }
+
+    function applyStateUpdate(vehicleId, activityState, vehicleType) {
+        const v = vehicles[vehicleId];
+        if (!v) return;
+
+        const stateClass = activityStateToClass(activityState);
+        if (v.state !== stateClass) {
+            v.group.setAttribute('class', `vehicle-group ${stateClass}`);
+            v.state = stateClass;
+        }
+
+        if (vehicleType && vehicleType !== v.vehicleType) {
+            v.vehicleType = vehicleType;
+            v.path.setAttribute('d',
+                vehicleType === 'WasteBin'
+                    ? wasteBinSilhouette()
+                    : forkSilhouette());
+        }
+
+        const labelColor = stateLabelColor(activityState);
+        v.label.setAttribute('fill', labelColor);
+    }
+
+    // ----------------------------------------------------------------
     // Public API
     // ----------------------------------------------------------------
     window.fleetMap = {
 
         init: init,
 
+        // Single-item entry points — kept for compatibility / direct use.
         updatePosition: function (vehicleId, x, y, nodeId, heading) {
-            const v = vehicles[vehicleId];
-            if (!v) return;
-
-            // If dead-reckoning is active, use server position as sync correction
-            if (v.routeActive && nodeId) {
-                return;
-            }
-
-            // Non-dead-reckoning path (idle, charging, etc.)
-            let targetX, targetY;
-            let targetHeading = heading !== undefined ? heading : v.currentHeading;
-
-            if (nodeId && nodePositions[parseInt(nodeId)]) {
-                targetX = nodePositions[parseInt(nodeId)].x;
-                targetY = nodePositions[parseInt(nodeId)].y;
-            } else if (x != null && y != null) {
-                targetX = toSvgX(parseFloat(x));
-                targetY = toSvgY(parseFloat(y));
-            } else {
-                return;
-            }
-
-            if (!v.positioned) {
-                v.group.setAttribute('transform',
-                    `translate(${targetX},${targetY}) rotate(${svgHeading(targetHeading)})`);
-                v.currentX = targetX;
-                v.currentY = targetY;
-                v.currentHeading = targetHeading;
-                v.positioned = true;
-                return;
-            }
-
-            animTargets[vehicleId] = {
-                targetX, targetY, targetHeading,
-                startX: v.currentX,
-                startY: v.currentY,
-                startHeading: v.currentHeading,
-                startTime: performance.now(),
-                duration: 250
-            };
-
-            startAnimLoop();
+            applyPositionUpdate(vehicleId, x, y, nodeId, heading);
         },
 
         updateState: function (vehicleId, activityState, vehicleType) {
-            const v = vehicles[vehicleId];
-            if (!v) return;
+            applyStateUpdate(vehicleId, activityState, vehicleType);
+        },
 
-            const stateClass = activityStateToClass(activityState);
-            if (v.state !== stateClass) {
-                v.group.setAttribute('class', `vehicle-group ${stateClass}`);
-                v.state = stateClass;
+        // Batched entry points — one JS interop call per flush cycle,
+        // looping over every vehicle in the batch internally instead of
+        // Dashboard.razor calling into JS once per vehicle. Note: payload
+        // property names arrive camelCased (Blazor's default JSON casing
+        // for JS interop), e.g. item.vehicleId, item.nodeId.
+        updatePositions: function (batch) {
+            if (!batch) return;
+            for (const item of batch) {
+                applyPositionUpdate(
+                    item.vehicleId, item.x, item.y, item.nodeId, item.heading);
             }
+        },
 
-            if (vehicleType && vehicleType !== v.vehicleType) {
-                v.vehicleType = vehicleType;
-                v.path.setAttribute('d',
-                    vehicleType === 'WasteBin'
-                        ? wasteBinSilhouette()
-                        : forkSilhouette());
+        updateStates: function (batch) {
+            if (!batch) return;
+            for (const item of batch) {
+                applyStateUpdate(
+                    item.vehicleId, item.activityState, item.vehicleType);
             }
-
-            const labelColor = stateLabelColor(activityState);
-            v.label.setAttribute('fill', labelColor);
         },
 
         zoomIn: function () {
@@ -429,12 +478,14 @@
                 v.routeActive = false;
                 delete animTargets[vehicleId];
                 v.routeVersion = (v.routeVersion || 0) + 1;
-                console.log(`V${vehicleId} setVehicleRoute: 0 nodes, version now ${v.routeVersion}`);
+                if (DEBUG_VERBOSE)
+                    console.log(`V${vehicleId} setVehicleRoute: 0 nodes, version now ${v.routeVersion}`);
                 return;
             }
             delete animTargets[vehicleId];
             v.routeVersion = (v.routeVersion || 0) + 1;
-            console.log(`V${vehicleId} setVehicleRoute: ${routeNodeIds.length} nodes, version now ${v.routeVersion}`);
+            if (DEBUG_VERBOSE)
+                console.log(`V${vehicleId} setVehicleRoute: ${routeNodeIds.length} nodes, version now ${v.routeVersion}`);
             const firstNodeId = routeNodeIds[0];
             const firstPos = nodePositions[firstNodeId];
             v.routeNodeIds = routeNodeIds;
@@ -445,8 +496,8 @@
                 const dy = v.currentY - firstPos.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                // ADDED LOG LINE — right here, before the branch decision:
-                console.log(`V${vehicleId} route-start gap: dist=${dist.toFixed(1)}px from (${v.currentX.toFixed(0)},${v.currentY.toFixed(0)}) to firstNode=${firstNodeId}(${firstPos.x.toFixed(0)},${firstPos.y.toFixed(0)})`);
+                if (DEBUG_VERBOSE)
+                    console.log(`V${vehicleId} route-start gap: dist=${dist.toFixed(1)}px from (${v.currentX.toFixed(0)},${v.currentY.toFixed(0)}) to firstNode=${firstNodeId}(${firstPos.x.toFixed(0)},${firstPos.y.toFixed(0)})`);
 
                 if (dist > 2 && dist < 50) {
                     // Short gap — bridge smoothly
@@ -516,7 +567,8 @@
     function scheduleNextMove(vehicleId) {
         const v = vehicles[vehicleId];
 
-        console.log(`V${vehicleId} scheduleNextMove: index=${v.routeIndex}/${v.routeNodeIds.length} active=${v.routeActive} version=${v.routeVersion}`);
+        if (DEBUG_VERBOSE)
+            console.log(`V${vehicleId} scheduleNextMove: index=${v.routeIndex}/${v.routeNodeIds.length} active=${v.routeActive} version=${v.routeVersion}`);
 
         if (!v || !v.routeActive) return;
         if (v.routeIndex >= v.routeNodeIds.length - 1) {
@@ -530,7 +582,8 @@
         const toPos = nodePositions[toId];
 
         if (!fromPos || !toPos) {
-            console.log(`V${vehicleId} missing node position: from=${fromId}(${!!fromPos}) to=${toId}(${!!toPos}) — skipping`);
+            if (DEBUG_VERBOSE)
+                console.log(`V${vehicleId} missing node position: from=${fromId}(${!!fromPos}) to=${toId}(${!!toPos}) — skipping`);
             v.routeIndex++;
             scheduleNextMove(vehicleId);
             return;
@@ -556,7 +609,8 @@
             durationMs = Math.max(200, (distanceM / speedMs) * 1000);
         }
 
-        console.log(`V${vehicleId} move ${fromId}→${toId}: ${distanceM.toFixed(3)}m @ ${speedMs}m/s = ${durationMs.toFixed(0)}ms`);
+        if (DEBUG_VERBOSE)
+            console.log(`V${vehicleId} move ${fromId}→${toId}: ${distanceM.toFixed(3)}m @ ${speedMs}m/s = ${durationMs.toFixed(0)}ms`);
 
         const routeVersion = v.routeVersion;
 
@@ -588,10 +642,15 @@
         const group = target.closest('.vehicle-group');
         if (group) {
             const vid = parseInt(group.getAttribute('data-vid'));
-            console.log('Vehicle clicked:', vid);
+            const clickTime = performance.now();
+            console.log(`Vehicle clicked: ${vid} @ ${clickTime.toFixed(0)}ms`);
             setTimeout(function () {
-                if (window.fleetMap._dotNetRef)
-                    window.fleetMap._dotNetRef.invokeMethodAsync('OnVehicleClicked', vid);
+                console.log(`  → setTimeout fired for V${vid} @ ${performance.now().toFixed(0)}ms (delay=${(performance.now() - clickTime).toFixed(0)}ms)`);
+                if (window.fleetMap._dotNetRef) {
+                    const invokeStart = performance.now();
+                    window.fleetMap._dotNetRef.invokeMethodAsync('OnVehicleClicked', vid)
+                        .then(() => console.log(`  → invokeMethodAsync resolved for V${vid} @ ${performance.now().toFixed(0)}ms (took ${(performance.now() - invokeStart).toFixed(0)}ms)`));
+                }
             }, 0);
             return;
         }
