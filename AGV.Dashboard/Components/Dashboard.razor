@@ -1,12 +1,15 @@
 @page "/"
 @using AGV.Core.Enums
+@using AGV.Core.Messages
 @using AGV.Fleet.Infrastructure
-@using Microsoft.AspNetCore.SignalR.Client
+@using AGV.Dashboard.Services
 @using Microsoft.JSInterop
 @inject NavigationManager Nav
 @inject VehicleRegistry VehicleRegistry
+@inject DashboardBroadcaster Broadcaster
 @inject IJSRuntime JS
 @inject ILogger<Dashboard> Logger
+@inject CircuitCleanupRegistry CircuitCleanup
 @implements IAsyncDisposable
 
 <div class="dashboard">
@@ -164,9 +167,20 @@
 @code {
     // ----------------------------------------------------------------
     // State
+    //
+    // ARCHITECTURE NOTE: this component previously opened its own
+    // separate SignalR HubConnection back to this same server's own
+    // /fleethub endpoint (a server-to-server loopback) purely to
+    // receive updates DashboardBroadcaster was already raising
+    // in-process. That loopback connection was found to be the root
+    // cause of severe, erratic delays (seconds to several minutes) in
+    // the vehicle-click-to-popup path — see ToDo7.md #10. It has been
+    // removed entirely; this component now subscribes directly to
+    // DashboardBroadcaster's C# events instead (see OnInitializedAsync
+    // and the Handle*/Dispose region below). The real /fleethub hub
+    // still exists and works normally for any genuine external client.
     // ----------------------------------------------------------------
 
-    private HubConnection? _hub;
     private bool _hubConnected;
 
     private int _enqueued;
@@ -179,17 +193,29 @@
     private string _simTime = "00:00:00";
     private decimal _speedFactor = 60m;
 
-    private sealed record SimClockPayload(string SimTime, decimal SpeedFactor, long TickCount);
-
-    private VehicleDetailPayload? _selectedVehicle;
+    private VehicleDetailDto? _selectedVehicle;
     private DotNetObjectReference<Dashboard>? _dotNetRef;
+
+    private readonly List<AlertUpdate> _alerts = new();
+
+    // Unique ID per Dashboard component instance (9/9 diagnostic
+    // session) — lets us tell distinct instances apart in the server
+    // log across refreshes, to verify empirically whether DisposeAsync
+    // fires reliably on hard refresh/abrupt navigation. See
+    // ToDo14.md #11 for the theory this is testing: an orphaned
+    // instance that never disposes stays subscribed to
+    // DashboardBroadcaster's events forever, consuming resources in
+    // the background indefinitely.
+    private readonly string _instanceId = Guid.NewGuid().ToString("N")[..8];
 
     // ----------------------------------------------------------------
     // Lifecycle
     // ----------------------------------------------------------------
 
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync()
     {
+        Logger.LogInformation("Dashboard OnInitializedAsync: instance {InstanceId} STARTING", _instanceId);
+
         // Seed vehicle states from registry so cards appear immediately
         foreach (var vehicle in VehicleRegistry.GetAll())
         {
@@ -202,17 +228,58 @@
             };
         }
 
-        // Connect to SignalR hub
-        _hub = new HubConnectionBuilder()
-            .WithUrl(Nav.ToAbsoluteUri("/fleethub"))
-            .WithAutomaticReconnect()
-            .Build();
+        // Subscribe directly to the broadcaster's in-process events —
+        // no network hop, no serialization, no separate connection
+        // lifecycle to manage or lose. Unsubscription is handled by
+        // UnsubscribeFromBroadcaster (see below), called from BOTH
+        // DisposeAsync (for graceful teardown) AND CircuitCleanup's
+        // registered callback (the RELIABLE path — see 9/10 note above
+        // and CircuitCleanupRegistry's own doc comments; DisposeAsync
+        // alone was confirmed NOT to fire on a hard refresh).
+        Broadcaster.VehicleStatesUpdated += HandleVehicleStatesUpdated;
+        Broadcaster.VehiclePositionsUpdated += HandleVehiclePositionsUpdated;
+        Broadcaster.MissionCountersUpdated += HandleMissionCountersUpdated;
+        Broadcaster.SimClockUpdated += HandleSimClockUpdated;
+        Broadcaster.AlertsUpdated += HandleAlertsUpdated;
+        Broadcaster.VehicleDetailUpdated += HandleVehicleDetailUpdated;
+        Broadcaster.VehicleMissionUpdated += HandleVehicleMissionUpdated;
 
-        // Batched: one message per flush cycle carrying a list of every
-        // vehicle whose state changed, instead of one message per vehicle.
-        // A single JS interop call and a single StateHasChanged handle
-        // the whole batch, regardless of how many vehicles are in it.
-        _hub.On<List<VehicleStatePayload>>("UpdateVehicleStates", batch =>
+        CircuitCleanup.RegisterCleanup(UnsubscribeFromBroadcaster);
+
+        // No separate connection to track anymore — the Blazor circuit
+        // itself (managed by the framework, with its own "Could not
+        // reconnect" overlay on genuine loss) is the only connectivity
+        // that matters now. Simply reflect that this component is up.
+        _hubConnected = true;
+
+        return Task.CompletedTask;
+    }
+
+    private bool _mapInitialized;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("fleetMap.init");
+            await JS.InvokeVoidAsync("fleetMap.setDotNetRef", _dotNetRef);
+            _mapInitialized = true;
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Event handlers — each of these is invoked by DashboardBroadcaster
+    // from one of its background broadcast-loop threads, NOT the Blazor
+    // render thread, so every handler marshals its work back via
+    // InvokeAsync (which also lets us safely await JS interop calls,
+    // replacing the previous fire-and-forget Task.Run(() => JS...)
+    // pattern with a properly dispatched await).
+    // ----------------------------------------------------------------
+
+    private void HandleVehicleStatesUpdated(List<VehicleStateDto> batch)
+    {
+        InvokeAsync(async () =>
         {
             foreach (var state in batch)
             {
@@ -227,86 +294,73 @@
                     VehicleType = state.VehicleType,
                 };
             }
-            // Also update JS map — one batched interop call for the whole list
-            Task.Run(() => JS.InvokeVoidAsync("fleetMap.updateStates", batch));
-            InvokeAsync(StateHasChanged);
+            await JS.InvokeVoidAsync("fleetMap.updateStates", batch);
+            StateHasChanged();
         });
+    }
 
-        _hub.On<MissionCounterPayload>("UpdateMissionCounters", counters =>
+    private void HandleVehiclePositionsUpdated(List<VehiclePositionDto> batch)
+    {
+        InvokeAsync(async () =>
         {
-        _enqueued = counters.Enqueued;
-        _dispatched = counters.Dispatched;
-        _completed = counters.Completed;
-        _queueDepth = counters.QueueDepth;
-        InvokeAsync(StateHasChanged);
+            await JS.InvokeVoidAsync("fleetMap.updatePositions", batch);
         });
+    }
 
-        // Position updates go straight to JS for smooth SVG animation.
-        // Batched: one message per flush cycle carrying a list, one
-        // interop call per batch instead of one per vehicle. No
-        // StateHasChanged here — positions never touched C#-side state.
-        _hub.On<List<VehiclePositionPayload>>("UpdateVehiclePositions", batch =>
+    private void HandleMissionCountersUpdated(MissionCounterUpdate counters)
+    {
+        InvokeAsync(() =>
         {
-            Task.Run(() => JS.InvokeVoidAsync("fleetMap.updatePositions", batch));
+            _enqueued = counters.Enqueued;
+            _dispatched = counters.Dispatched;
+            _completed = counters.Completed;
+            _queueDepth = counters.QueueDepth;
+            StateHasChanged();
         });
+    }
 
-        // Update the simulation clock
-        _hub.On<SimClockPayload>("UpdateSimClock", clock =>
+    private void HandleSimClockUpdated(SimClockUpdate clock)
+    {
+        InvokeAsync(() =>
         {
             _simTime = clock.SimTime;
             _speedFactor = clock.SpeedFactor;
-            InvokeAsync(StateHasChanged);
+            StateHasChanged();
         });
-
-        _hub.On<AlertBatchPayload>("UpdateAlerts", batch =>
-        {
-            _alerts.Clear();
-            foreach (var a in batch.Alerts)
-                _alerts.Add(a);
-            InvokeAsync(StateHasChanged);
-        });
-
-        _hub.On<VehicleDetailPayload>("UpdateVehicleDetail", detail =>
-        {
-            Logger.LogInformation("UpdateVehicleDetail received: V{VehicleId}", detail.VehicleId);
-            _selectedVehicle = detail;
-            InvokeAsync(StateHasChanged);
-        });
-
-        _hub.On<VehicleMissionPayload>("UpdateVehicleMission", mission =>
-        {
-            var id = mission.VehicleId;
-            var routeJson = System.Text.Json.JsonSerializer.Serialize(mission.RouteNodeIds);
-            Task.Run(() => JS.InvokeVoidAsync(
-                "fleetMap.setVehicleRoute", id, mission.RouteNodeIds.ToArray()));
-        });
-
-        _hub.Reconnected += _ =>
-        {
-            _hubConnected = true;
-            return InvokeAsync(StateHasChanged);
-        };
-        _hub.Closed += _ =>
-        {
-            _hubConnected = false;
-            return InvokeAsync(StateHasChanged);
-        };
-
-        await _hub.StartAsync();
-        _hubConnected = _hub.State == HubConnectionState.Connected;
     }
 
-    private bool _mapInitialized;
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    private void HandleAlertsUpdated(List<AlertUpdate> batch)
     {
-        if (firstRender)
+        InvokeAsync(() =>
         {
-            _dotNetRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("fleetMap.init");
-            await JS.InvokeVoidAsync("fleetMap.setDotNetRef", _dotNetRef);
-            _mapInitialized = true;
-        }
+            _alerts.Clear();
+            _alerts.AddRange(batch);
+            StateHasChanged();
+        });
+    }
+
+    private void HandleVehicleDetailUpdated(VehicleDetailDto detail)
+    {
+        InvokeAsync(() =>
+        {
+            // Downgraded to Debug (9/3): was Information, firing at 2Hz
+            // while any popup is open — a real contributor to Console
+            // sink contention alongside GetVehicleDetail. See
+            // ToDo10.md #11.
+            Logger.LogDebug("UpdateVehicleDetail received: V{VehicleId}", detail.VehicleId);
+            _selectedVehicle = detail;
+            StateHasChanged();
+        });
+    }
+
+    private void HandleVehicleMissionUpdated(
+        int vehicleId, int? missionId, IReadOnlyList<int> routeNodeIds)
+    {
+        InvokeAsync(async () =>
+        {
+            await JS.InvokeVoidAsync(
+                "fleetMap.setVehicleRoute", vehicleId, routeNodeIds.ToArray());
+        });
     }
 
     // ----------------------------------------------------------------
@@ -347,35 +401,69 @@
         soc < 25m ? "soc-critical" :
         soc < 50m ? "soc-low" : "soc-ok";
 
-    private static string GetAlertClass(string type) => type switch
+    private static string GetAlertClass(AlertType type) => type switch
     {
-        "LowBattery" => "alert-warning",
-        "VehicleBlocked" => "alert-caution",
-        "Deadlock" => "alert-critical",
+        AlertType.LowBattery => "alert-warning",
+        AlertType.VehicleBlocked => "alert-caution",
+        AlertType.Deadlock => "alert-critical",
         _ => "alert-warning"
     };
 
-    private static string GetAlertIcon(string type) => type switch
+    private static string GetAlertIcon(AlertType type) => type switch
     {
-        "LowBattery" => "⚡",
-        "VehicleBlocked" => "⛔",
-        "Deadlock" => "🔴",
+        AlertType.LowBattery => "⚡",
+        AlertType.VehicleBlocked => "⛔",
+        AlertType.Deadlock => "🔴",
         _ => "⚠"
     };
 
     // ----------------------------------------------------------------
-    // Dispose
+    // Dispose — unsubscribe from every DashboardBroadcaster event.
+    // DashboardBroadcaster is a singleton with a lifetime far longer
+    // than any individual component instance/circuit; skipping this
+    // would leak a subscription (and this component instance, via the
+    // delegate's reference to it) on every circuit teardown/reconnect.
     // ----------------------------------------------------------------
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
+        Logger.LogInformation("Dashboard DisposeAsync: instance {InstanceId} DISPOSING", _instanceId);
+
+        // Also runs via CircuitCleanup on connection-down (the reliable
+        // path) — UnsubscribeFromBroadcaster's event -= calls are
+        // idempotent, so no harm if both fire for a graceful teardown.
+        UnsubscribeFromBroadcaster();
+
         _dotNetRef?.Dispose();
-        if (_hub is not null)
-            await _hub.DisposeAsync();
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Unsubscribes from every DashboardBroadcaster event. Called from
+    /// two places: DisposeAsync (graceful component teardown) and
+    /// CircuitCleanupRegistry's callback, registered in
+    /// OnInitializedAsync, which fires reliably on circuit disconnect
+    /// even when DisposeAsync does not (confirmed 9/10 — see class-
+    /// level notes and ToDo14.md #11). Safe to call more than once;
+    /// event -= on an already-removed handler is a no-op.
+    /// </summary>
+    private void UnsubscribeFromBroadcaster()
+    {
+        Logger.LogInformation("Dashboard UnsubscribeFromBroadcaster: instance {InstanceId} CLEANUP", _instanceId);
+
+        Broadcaster.VehicleStatesUpdated -= HandleVehicleStatesUpdated;
+        Broadcaster.VehiclePositionsUpdated -= HandleVehiclePositionsUpdated;
+        Broadcaster.MissionCountersUpdated -= HandleMissionCountersUpdated;
+        Broadcaster.SimClockUpdated -= HandleSimClockUpdated;
+        Broadcaster.AlertsUpdated -= HandleAlertsUpdated;
+        Broadcaster.VehicleDetailUpdated -= HandleVehicleDetailUpdated;
+        Broadcaster.VehicleMissionUpdated -= HandleVehicleMissionUpdated;
     }
 
     // ----------------------------------------------------------------
-    // Local display models (SignalR payload types)
+    // Local display model (fleet-grid card state — not a wire payload
+    // anymore, just this component's own view-model)
     // ----------------------------------------------------------------
 
     private sealed class VehicleDisplayState
@@ -389,61 +477,34 @@
         public string VehicleType { get; set; } = "";
     }
 
-    private sealed record VehicleStatePayload(
-        int VehicleId, string SerialNumber, string ActivityState,
-        decimal SocPercent, bool IsCharging, bool IsLoaded,
-        string CurrentOrderId, string VehicleType);
+    // ----------------------------------------------------------------
+    // Click handling — direct calls to DashboardBroadcaster, no
+    // SignalR round-trip. Both [JSInvokable] methods are invoked by
+    // Blazor's JS interop dispatch, which already runs on the correct
+    // render sync-context, so no extra InvokeAsync wrapping is needed
+    // here (unlike the broadcaster event handlers above).
+    // ----------------------------------------------------------------
 
-    private sealed record MissionCounterPayload(
-        int Enqueued, int Dispatched, int Completed, int QueueDepth);
-
-    private sealed record VehiclePositionPayload(
-        int VehicleId, string SerialNumber,
-        decimal X, decimal Y, string NodeId,
-        decimal Heading);
-    
-    private sealed record AlertPayload(
-        string Type, int VehicleId,
-        string Message, DateTime Timestamp);
-
-    private sealed record AlertBatchPayload(List<AlertPayload> Alerts);
-
-    private sealed class VehicleDetailPayload
+    [JSInvokable]
+    public Task OnVehicleClicked(int vehicleId)
     {
-        public int VehicleId { get; set; }
-        public string SerialNumber { get; set; } = "";
-        public string ActivityState { get; set; } = "";
-        public decimal SocPercent { get; set; }
-        public bool IsLoaded { get; set; }
-        public int? CurrentMissionId { get; set; }
-        public List<int> RouteNodeIds { get; set; } = new();
-        public int? CurrentNodeId { get; set; }
-        public List<decimal> SocHistory { get; set; } = new();
-    }
-    private readonly List<AlertPayload> _alerts = new();
-
-    private sealed class VehicleMissionPayload
-    {
-        public int VehicleId { get; set; }
-        public int? MissionId { get; set; }
-        public List<int> RouteNodeIds { get; set; } = new();
+        Logger.LogInformation("OnVehicleClicked: V{VehicleId}", vehicleId);
+        Broadcaster.SetSelectedVehicle(vehicleId);
+        var detail = Broadcaster.GetVehicleDetail(vehicleId);
+        if (detail is not null)
+        {
+            _selectedVehicle = detail;
+            StateHasChanged();
+        }
+        return Task.CompletedTask;
     }
 
     [JSInvokable]
-    public async Task OnVehicleClicked(int vehicleId)
-    {
-        Logger.LogInformation("OnVehicleClicked ENTER: V{VehicleId}", vehicleId);
-        if (_hub is not null)
-            await _hub.SendAsync("RequestVehicleDetail", vehicleId);
-        Logger.LogInformation("OnVehicleClicked EXIT: V{VehicleId}", vehicleId);
-    }
-
-    [JSInvokable]
-    public async Task ClosePopup()
+    public Task ClosePopup()
     {
         _selectedVehicle = null;
-        if (_hub is not null)
-            await _hub.SendAsync("ClearVehicleDetail");
-        await InvokeAsync(StateHasChanged);
+        Broadcaster.SetSelectedVehicle(null);
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 }

@@ -336,6 +336,14 @@ namespace AGV.Fleet.Services
             var lockedNodes = _blockingState
                 .GetVehicleLockedNodeIds(vehicleId);
 
+            // 9/20 diagnostic session: released-node logging moved
+            // outside the lock (was inside a loop inside the lock —
+            // worse than a single call, since it could fire multiple
+            // times per lock acquisition). See MissionQueueService.cs
+            // for the full rationale — a stuck/slow log write of any
+            // kind can no longer hold this application lock hostage.
+            var releasedNodeIds = new List<int>();
+
             lock (_trafficLock)
             {
                 if (_vehicleItineraries.TryGetValue(vehicleId,
@@ -352,10 +360,7 @@ namespace AGV.Fleet.Services
                             if (lockedNodes.Contains(nodeId))
                             {
                                 _blockingState.UnblockNode(nodeId);
-                                _lockLogger.LogDebug(
-                                    "TruncateAndAppend: released " +
-                                    "node {NodeId} for vehicle {VehicleId}",
-                                    nodeId, vehicleId);
+                                releasedNodeIds.Add(nodeId);
                             }
                         }
                     }
@@ -367,6 +372,14 @@ namespace AGV.Fleet.Services
                         .ToList();
                     _vehicleItineraries[vehicleId] = newFull;
                 }
+            }
+
+            foreach (var nodeId in releasedNodeIds)
+            {
+                _lockLogger.LogDebug(
+                    "TruncateAndAppend: released " +
+                    "node {NodeId} for vehicle {VehicleId}",
+                    nodeId, vehicleId);
             }
 
             _logger.LogInformation(

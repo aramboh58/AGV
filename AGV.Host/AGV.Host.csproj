@@ -5,6 +5,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>dotnet-AGV.Host-46532a32-8089-43d1-995c-1062aa50143f</UserSecretsId>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Added 9/3 diagnostic session: wraps the Console sink so log
+         writes happen on a background thread instead of blocking the
+         calling thread on Console.Out's internal lock. Root-caused via
+         PerfView contention trace: 82.6% of all measured lock
+         contention (370 of 448 events, including single blocks of
+         7+ minutes) traced directly to serilog.sinks.console — with
+         20 vehicles ticking and frequent diagnostic logging, many
+         threads were piling up on that one shared lock. See
+         ToDo10.md #11 for full evidence. -->
+    <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />

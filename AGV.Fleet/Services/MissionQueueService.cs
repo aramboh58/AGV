@@ -56,10 +56,33 @@ namespace AGV.Fleet.Services
         /// </summary>
         public void Enqueue(MissionContext mission)
         {
+            int insertAt;
+            int depth;
+
+            // 9/20 diagnostic session — CRITICAL FIX: logging moved
+            // OUTSIDE the lock block. Live debugger evidence (Visual
+            // Studio Parallel Stacks, captured mid-freeze) showed a
+            // thread holding THIS lock while stuck inside
+            // Serilog.Sinks.Console's Emit → Win32 GetBufferInfo,
+            // triggered by an accidental console text selection
+            // (Windows "QuickEdit Mode" suspends console output while
+            // text is selected). Every other thread needing this lock
+            // (FleetManagerService's tick-driven EnqueueMissionAsync
+            // and its own dispatch loop's SelectCandidateVehicles)
+            // piled up behind it — for however long the accidental
+            // selection lasted. This explains the near-zero-CPU,
+            // widely-variable-duration, self-resolving contention
+            // pattern chased across many sessions (see ToDo18.md #11
+            // and the live-debugging session that found this). With
+            // logging outside the lock, a stuck/slow log write of ANY
+            // kind — this trigger or any future one — can no longer
+            // hold this application lock hostage. QuickEdit Mode was
+            // also disabled as an immediate mitigation, but this is
+            // the real, permanent, cause-agnostic fix.
             lock (_lock)
             {
                 // Find insertion point — maintain priority order
-                var insertAt = _queue.Count;
+                insertAt = _queue.Count;
                 for (int i = 0; i < _queue.Count; i++)
                 {
                     if (mission.Priority < _queue[i].Priority)
@@ -69,13 +92,14 @@ namespace AGV.Fleet.Services
                     }
                 }
                 _queue.Insert(insertAt, mission);
-
-                _logger.LogDebug(
-                    "Mission {MissionId} enqueued at position {Position} " +
-                    "(priority={Priority}, queue depth={Depth})",
-                    mission.MissionId, insertAt,
-                    mission.Priority, _queue.Count);
+                depth = _queue.Count;
             }
+
+            _logger.LogDebug(
+                "Mission {MissionId} enqueued at position {Position} " +
+                "(priority={Priority}, queue depth={Depth})",
+                mission.MissionId, insertAt,
+                mission.Priority, depth);
         }
 
         /// <summary>
@@ -202,16 +226,19 @@ namespace AGV.Fleet.Services
         /// </summary>
         public bool Cancel(int missionId)
         {
+            bool removed;
             lock (_lock)
             {
                 var idx = _queue.FindIndex(m => m.MissionId == missionId);
                 if (idx < 0) return false;
                 _queue.RemoveAt(idx);
-                _logger.LogInformation(
-                    "Mission {MissionId} cancelled from queue",
-                    missionId);
-                return true;
+                removed = true;
             }
+
+            _logger.LogInformation(
+                "Mission {MissionId} cancelled from queue",
+                missionId);
+            return removed;
         }
     }
 }

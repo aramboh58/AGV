@@ -8,11 +8,14 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
+using System.Collections.Concurrent;
 
 namespace AGV.Dashboard.Services
 {
     /// <summary>
-    /// Hosted service that bridges the ChannelRegistry to SignalR.
+    /// Hosted service that bridges the ChannelRegistry to SignalR, and
+    /// also to in-process C# events for consumers running in the same
+    /// process — see the "In-process event API" region below.
     ///
     /// Reads VehiclePositionUpdates and VehicleStateUpdates from the
     /// ChannelRegistry (written by SimulatedVehicleAdapter or
@@ -23,15 +26,37 @@ namespace AGV.Dashboard.Services
     /// dashboard counters panel, and streams live detail for whichever
     /// vehicle currently has its popup open.
     ///
-    /// Positions and states are each sent as a single batched list per
-    /// flush cycle (not one message per vehicle) — see UpdateVehicleStates
-    /// / UpdateVehiclePositions below. Sending N individual messages per
-    /// flush cycle (one per changed vehicle) was found to cause a tight
-    /// burst of SignalR deliveries — each triggering its own client-side
-    /// JS interop call and, for states, its own full-component
-    /// StateHasChanged render — that could back up the browser's single
-    /// main-thread message queue badly enough to noticeably delay
-    /// unrelated messages (e.g. vehicle popup detail) queued behind them.
+    /// ARCHITECTURE NOTE (9/1): this class deliberately avoids blocking
+    /// synchronization (`lock`/Monitor) on any state shared between its
+    /// several concurrent background loops. Diagnosed via dotnet-counters
+    /// (8/31 session, see ToDo10.md #11): under sustained load, Monitor
+    /// Lock Contention Count stayed nonzero almost continuously, and
+    /// ThreadPool Thread Count stalled at 8-9 while Queue Length grew
+    /// into the hundreds — several async loops (positions, states,
+    /// selected-vehicle detail, etc.) "lapping" each other and backing
+    /// up on shared locked resources. Raising the ThreadPool floor and
+    /// enabling Server GC were tried and reverted — this hardware is a
+    /// 2-core/2-logical-processor machine, where more threads just means
+    /// more contention for the same 2 cores, not more real parallelism;
+    /// Server GC's per-core-heap model is also a poor fit below a
+    /// handful of cores. The actual fix is eliminating the blocking
+    /// synchronization itself:
+    ///   - `latest` (state batching): was `Dictionary` + `lock` — now a
+    ///     ConcurrentDictionary reference swapped atomically via
+    ///     Interlocked.Exchange (lock-free "grab everything and reset"
+    ///     pattern — no Monitor involved at all).
+    ///   - `_selectedVehicleId`: was `int?` + `lock` — now a plain
+    ///     `volatile int` (0 = none), read/written without any lock.
+    ///   - `_socHistory`: was a plain, UNSYNCHRONIZED Dictionary<int,
+    ///     Queue<...>> — written by one loop, read from at least two
+    ///     other call sites (BroadcastSelectedVehicleDetailAsync's loop
+    ///     AND GetVehicleDetail called directly from Dashboard.razor's
+    ///     OnVehicleClicked) with NO protection at all. This was a real
+    ///     thread-safety bug, not just a performance issue — concurrent
+    ///     unprotected Dictionary access can throw or corrupt state,
+    ///     and such failures would be silently swallowed by this
+    ///     class's broad catch(Exception) handlers. Now a
+    ///     ConcurrentDictionary<int, ConcurrentQueue<...>>.
     /// </summary>
     public sealed class DashboardBroadcaster : BackgroundService
     {
@@ -41,7 +66,10 @@ namespace AGV.Dashboard.Services
         private readonly VehicleRegistry _registry;
         private readonly TrafficManagerService _traffic;
 
-        private readonly Dictionary<int, Queue<(DateTime Time, decimal Soc)>> _socHistory = new();
+        // Was Dictionary<int, Queue<(DateTime,decimal)>> with NO lock —
+        // genuinely unsynchronized concurrent access. See class-level
+        // ARCHITECTURE NOTE above.
+        private readonly ConcurrentDictionary<int, ConcurrentQueue<(DateTime Time, decimal Soc)>> _socHistory = new();
         private const int SocHistoryMaxPoints = 15;
 
         // Mission counters — incremented by reading the dispatch channel
@@ -56,10 +84,26 @@ namespace AGV.Dashboard.Services
         private DateTime _simStartTime = DateTime.UtcNow;
 
         // Currently selected vehicle for live popup detail streaming.
-        // Set via SetSelectedVehicle (called from FleetHub.RequestVehicleDetail
-        // and cleared via FleetHub.ClearVehicleDetail on popup close).
-        private int? _selectedVehicleId;
-        private readonly object _selectionLock = new();
+        // Was int? behind a lock — now a plain volatile int (0 = none).
+        // Set via SetSelectedVehicle (called directly by Dashboard.razor
+        // on popup open/close — no hub round-trip involved).
+        private volatile int _selectedVehicleId; // 0 = no selection
+
+        // ----------------------------------------------------------------
+        // In-process event API — see ARCHITECTURE NOTE above.
+        // Each event mirrors one of the SignalR broadcasts below and is
+        // raised on whichever background thread is running the relevant
+        // broadcast loop (NOT the Blazor render thread) — subscribers
+        // must marshal back via InvokeAsync/StateHasChanged themselves.
+        // ----------------------------------------------------------------
+
+        public event Action<List<VehicleStateDto>>? VehicleStatesUpdated;
+        public event Action<List<VehiclePositionDto>>? VehiclePositionsUpdated;
+        public event Action<MissionCounterUpdate>? MissionCountersUpdated;
+        public event Action<SimClockUpdate>? SimClockUpdated;
+        public event Action<List<AlertUpdate>>? AlertsUpdated;
+        public event Action<VehicleDetailDto>? VehicleDetailUpdated;
+        public event Action<int, int?, IReadOnlyList<int>>? VehicleMissionUpdated;
 
         public DashboardBroadcaster(
             IHubContext<FleetHub> hub,
@@ -94,21 +138,31 @@ namespace AGV.Dashboard.Services
 
         // ----------------------------------------------------------------
         // Position updates — high frequency, direct from sim tick.
-        // Batched: one "UpdateVehiclePositions" message per flush cycle
-        // carrying a list, not one "UpdateVehiclePosition" message per
-        // vehicle.
+        // `latest` here is used entirely within this single loop/thread
+        // (drained via TryRead then sent, all in one method, no other
+        // method touches it) — no lock was ever needed here, and none
+        // is added now. Left unchanged from prior sessions.
         // ----------------------------------------------------------------
 
         private async Task BroadcastPositionsAsync(CancellationToken ct)
         {
-            // Throttle: batch position updates, broadcast at 4Hz max
+            // Throttle: batch position updates, broadcast at 2Hz max.
+            // NOTE (9/7): re-testing this reduction (previously tried
+            // 8/24-25 with no apparent benefit, then reverted) now that
+            // Console.Out lock contention has been eliminated (was
+            // 82.6% of all contention, now 0%). That fix may have been
+            // masking any real effect a rate reduction has on the
+            // remaining ~95% contention, which is genuine .NET
+            // Task/ThreadPool scheduling overhead — reducing concurrent
+            // Task volume is a well-motivated lever against that
+            // specific mechanism. See ToDo13.md #11.
             var latest = new Dictionary<int, VehiclePositionDto>();
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(250, ct); // 4 times per second
+                    await Task.Delay(500, ct); // 2 times per second
 
                     // Drain all pending position updates
                     while (_channels.VehiclePositionUpdates.Reader.TryRead(out var update))
@@ -124,8 +178,10 @@ namespace AGV.Dashboard.Services
 
                     if (latest.Count > 0)
                     {
+                        var batch = latest.Values.ToList();
                         await _hub.Clients.All.SendAsync(
-                            "UpdateVehiclePositions", latest.Values.ToList(), ct);
+                            "UpdateVehiclePositions", batch, ct);
+                        VehiclePositionsUpdated?.Invoke(batch);
                         latest.Clear();
                     }
                 }
@@ -140,17 +196,18 @@ namespace AGV.Dashboard.Services
         // ----------------------------------------------------------------
         // State updates — activity, SOC, order state.
         //
-        // Batched: one "UpdateVehicleStates" message per flush cycle
-        // carrying a list, not one "UpdateVehicleState" message per
-        // vehicle. A background drain task collapses incoming updates
-        // to latest-per-vehicle; a separate loop flushes that at a
-        // bounded 4Hz as a single message.
+        // `latest` was a Dictionary guarded by `lock (latest) { ... }`,
+        // contended between the drain task (writer) and the flush loop
+        // (reader/clearer) below. Now a ConcurrentDictionary reference,
+        // swapped out atomically via Interlocked.Exchange each flush —
+        // the writer never blocks on the flush, and the flush never
+        // blocks on the writer. No Monitor/lock involved at all.
         // ----------------------------------------------------------------
 
         private async Task BroadcastStatesAsync(
             CancellationToken ct)
         {
-            var latest = new Dictionary<int, VehicleStateDto>();
+            var latest = new ConcurrentDictionary<int, VehicleStateDto>();
 
             var drainTask = Task.Run(async () =>
             {
@@ -159,13 +216,13 @@ namespace AGV.Dashboard.Services
                 {
                     try
                     {
-                        if (!_socHistory.ContainsKey(update.VehicleId))
-                            _socHistory[update.VehicleId] = new Queue<(DateTime, decimal)>();
+                        var history = _socHistory.GetOrAdd(
+                            update.VehicleId,
+                            _ => new ConcurrentQueue<(DateTime, decimal)>());
 
-                        var history = _socHistory[update.VehicleId];
                         history.Enqueue((DateTime.UtcNow, update.BatteryStateOfCharge));
-                        if (history.Count > SocHistoryMaxPoints)
-                            history.Dequeue();
+                        while (history.Count > SocHistoryMaxPoints)
+                            history.TryDequeue(out _);
 
                         var dto = new VehicleStateDto(
                             update.VehicleId,
@@ -177,7 +234,9 @@ namespace AGV.Dashboard.Services
                             update.CurrentOrderId ?? string.Empty,
                             update.VehicleType);
 
-                        lock (latest) { latest[update.VehicleId] = dto; }
+                        // Lock-free: ConcurrentDictionary indexer set is
+                        // thread-safe on its own, no external lock needed.
+                        latest[update.VehicleId] = dto;
                     }
                     catch (OperationCanceledException) { break; }
                     catch (Exception ex)
@@ -192,18 +251,23 @@ namespace AGV.Dashboard.Services
             {
                 try
                 {
-                    await Task.Delay(250, ct); // 4 times per second — matches positions
+                    await Task.Delay(500, ct); // 2 times per second — matches positions (9/7 re-test, see note above)
 
-                    List<VehicleStateDto> toSend;
-                    lock (latest)
-                    {
-                        if (latest.Count == 0) continue;
-                        toSend = latest.Values.ToList();
-                        latest.Clear();
-                    }
+                    if (latest.IsEmpty) continue;
+
+                    // Atomically swap in a fresh empty dictionary and take
+                    // ownership of whatever was accumulated — no lock,
+                    // no race with the writer above (it simply starts
+                    // filling the new instance from this point on).
+                    var toSendDict = Interlocked.Exchange(
+                        ref latest, new ConcurrentDictionary<int, VehicleStateDto>());
+
+                    var toSend = toSendDict.Values.ToList();
+                    if (toSend.Count == 0) continue;
 
                     await _hub.Clients.All.SendAsync(
                         "UpdateVehicleStates", toSend, ct);
+                    VehicleStatesUpdated?.Invoke(toSend);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
@@ -228,6 +292,7 @@ namespace AGV.Dashboard.Services
                     "UpdateMissionCounters",
                     new { update.Enqueued, update.Dispatched, update.Completed },
                     ct);
+                MissionCountersUpdated?.Invoke(update);
             }
         }
 
@@ -245,13 +310,15 @@ namespace AGV.Dashboard.Services
         }
 
         // ----------------------------------------------------------------
-        // Selected-vehicle tracking — called by FleetHub on popup
-        // open (RequestVehicleDetail) and close (ClearVehicleDetail).
+        // Selected-vehicle tracking — called directly by Dashboard.razor
+        // on popup open (via OnVehicleClicked) and close (via ClosePopup).
+        // Plain volatile field, no lock — 0 represents "no selection"
+        // since vehicle IDs are always >= 1.
         // ----------------------------------------------------------------
 
         public void SetSelectedVehicle(int? vehicleId)
         {
-            lock (_selectionLock) { _selectedVehicleId = vehicleId; }
+            _selectedVehicleId = vehicleId ?? 0;
         }
 
         private async Task BroadcastSimClockAsync(CancellationToken ct)
@@ -263,6 +330,7 @@ namespace AGV.Dashboard.Services
                     "UpdateSimClock",
                     new { update.SimTime, update.SpeedFactor, update.TickCount },
                     ct);
+                SimClockUpdated?.Invoke(update);
             }
         }
         private async Task BroadcastAlertsAsync(CancellationToken ct)
@@ -282,6 +350,8 @@ namespace AGV.Dashboard.Services
                             alert.Timestamp
                         },
                         ct);
+                    // Intentionally not raising AlertsUpdated here — see
+                    // note in the periodic branch below.
                 }
             }, ct);
 
@@ -316,21 +386,30 @@ namespace AGV.Dashboard.Services
                         "UpdateAlerts",
                         new { Alerts = alerts },
                         ct);
+                    // This branch's payload shape ({Alerts:[...]}) is the
+                    // one Dashboard.razor's event consumers expect — see
+                    // prior session notes. Event raised only here.
+                    AlertsUpdated?.Invoke(alerts);
                 }
             }
 
             await drainTask;
         }
+
         public VehicleDetailDto GetVehicleDetail(int vehicleId)
         {
             var vehicle = _registry.GetById(vehicleId);
             if (vehicle is null) return null!;
 
-            _socHistory.TryGetValue(vehicleId, out var history);
-            var socPoints = history?.Select(h => h.Soc).ToList()
-                            ?? new List<decimal>();
+            var socPoints = _socHistory.TryGetValue(vehicleId, out var history)
+                ? history.Select(h => h.Soc).ToList()
+                : new List<decimal>();
 
-            _logger.LogInformation(
+            // Downgraded to Debug (9/3): was Information, firing on
+            // every click AND every 2Hz popup stream tick while a
+            // popup is open — a real contributor to Console sink
+            // contention. See ToDo10.md #11.
+            _logger.LogDebug(
                 "GetVehicleDetail: V{Id} SOC history points={Count}",
                 vehicleId, socPoints.Count);
 
@@ -360,15 +439,17 @@ namespace AGV.Dashboard.Services
                 {
                     await Task.Delay(500, ct); // 2 times per second
 
-                    int? vehicleId;
-                    lock (_selectionLock) { vehicleId = _selectedVehicleId; }
+                    var vehicleId = _selectedVehicleId; // volatile read, no lock
 
-                    if (vehicleId.HasValue)
+                    if (vehicleId != 0)
                     {
-                        var detail = GetVehicleDetail(vehicleId.Value);
+                        var detail = GetVehicleDetail(vehicleId);
                         if (detail is not null)
+                        {
                             await _hub.Clients.All.SendAsync(
                                 "UpdateVehicleDetail", detail, ct);
+                            VehicleDetailUpdated?.Invoke(detail);
+                        }
                     }
                 }
                 catch (OperationCanceledException) { break; }
@@ -385,15 +466,18 @@ namespace AGV.Dashboard.Services
             await foreach (var update in
                 _channels.MissionUpdates.Reader.ReadAllAsync(ct))
             {
+                var routeNodeIds = update.RouteNodeIds.ToList();
                 await _hub.Clients.All.SendAsync(
                     "UpdateVehicleMission",
                     new
                     {
                         update.VehicleId,
                         update.MissionId,
-                        RouteNodeIds = update.RouteNodeIds.ToList()
+                        RouteNodeIds = routeNodeIds
                     },
                     ct);
+                VehicleMissionUpdated?.Invoke(
+                    update.VehicleId, update.MissionId, routeNodeIds);
             }
         }
     }

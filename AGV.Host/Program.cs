@@ -15,12 +15,42 @@ using Microsoft.Extensions.Options;
 using Serilog;
 using AGV.Dashboard.Options;
 using AGV.Core.Enums;
+using System.Runtime.InteropServices;
+
+// ----------------------------------------------------------------
+// Disable console QuickEdit Mode (9/20 diagnostic session). Root
+// cause of the multi-session click-delay mystery, confirmed live via
+// Visual Studio's debugger (Parallel Stacks / Threads windows):
+// clicking/selecting text in the console window suspends ALL console
+// output (a Win32 GetBufferInfo call blocks) until the selection is
+// released. If that happens while a thread is inside an application
+// lock that logs before releasing it, every other thread needing
+// that same lock piles up behind it — explaining the near-zero-CPU,
+// widely-variable-duration, self-resolving contention chased across
+// many sessions (see ToDo18/19.md #11). The actual application locks
+// were separately fixed (logging moved outside every lock block in
+// MissionQueueService.cs, ChargeQueueManagerService.cs, and
+// TrafficManagerService.cs) — that is the real, permanent fix. This
+// is a belt-and-suspenders companion: disabling QuickEdit Mode in
+// code means the trigger itself can never occur again, regardless of
+// anyone's manual Windows Terminal/console settings. Safe to call on
+// any platform — silently does nothing if there's no console (e.g.
+// running as a Windows Service) or the API isn't available.
+// ----------------------------------------------------------------
+TryDisableConsoleQuickEdit();
 
 // ----------------------------------------------------------------
 // Bootstrap Serilog early so startup errors are captured
 // ----------------------------------------------------------------
 Log.Logger = new LoggerConfiguration()
-    .WriteTo.Console()
+    .WriteTo.Async(a =>
+    {
+        a.Console();
+        a.File(
+            "logs/server_log-.txt",
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: null);
+    })
     .CreateBootstrapLogger();
 
 try
@@ -30,13 +60,71 @@ try
     var builder = WebApplication.CreateBuilder(args);
 
     // ----------------------------------------------------------------
-    // Serilog
+    // Remove ASP.NET Core's default logging providers (9/3 diagnostic
+    // session). WebApplication.CreateBuilder wires up its OWN Console
+    // logging provider by default, entirely separate from Serilog —
+    // it was still writing directly and synchronously to Console.Out,
+    // bypassing the Async wrapper added around Serilog's Console sink
+    // above. This is very likely why total contention did not drop
+    // after that fix: PerfView's CallTree confirmed Serilog's own
+    // Console writes now correctly route through
+    // serilog.sinks.async's background thread (that path's share of
+    // total contention fell from ~82.6% to ~19%), but total
+    // contention volume still rose, consistent with a second, still-
+    // unwrapped Console writer being the new dominant contributor.
+    // See ToDo10.md #11.
     // ----------------------------------------------------------------
-    builder.Services.AddSerilog((services, config) => config
+    builder.Logging.ClearProviders();
+
+    // ----------------------------------------------------------------
+    // Serilog
+    // Console sink wrapped in Async (9/3): PerfView contention trace
+    // showed 82.6% of all lock contention traced to Console.Out's
+    // internal SyncTextWriter lock, contended across many concurrent
+    // background loops and per-vehicle logging. See ToDo10.md #11.
+    //
+    // File sink added (9/10): was console-only until now, meaning
+    // "server_log.txt" was actually just manually-redirected/copied
+    // console output with no real retention policy — a terminal's
+    // scrollback buffer limit could silently lose exactly the moment
+    // we need most (e.g. the frozen-rendering bug from ToDo15.md #11,
+    // which may take over an hour to recur). Writing directly to a
+    // real file, rolling daily, with unlimited retained files (nothing
+    // auto-deleted), removes that risk. Also wrapped in the same
+    // Async block — Serilog.Sinks.File was already an installed
+    // package but never wired up.
+    //
+    // CHANGED (9/23 diagnostic session): builder.Services.AddSerilog
+    // was replaced with builder.Host.UseSerilog. AddSerilog(Action<...>)
+    // builds a SEPARATE Serilog.Core.Logger for dependency injection
+    // and does NOT touch the static Log.Logger property — meaning the
+    // bootstrap logger created above (used by every static Log.X call
+    // still made later in this file) remained active as a SECOND,
+    // independent logging pipeline, with its OWN dedicated async
+    // background thread, writing to the same console with no
+    // coordination between the two pipelines. Confirmed live via
+    // Visual Studio's Threads window: two different threads
+    // simultaneously inside Serilog.Sinks.Console code at once (one
+    // in ConsoleSink.Emit, another in SystemConsoleTheme.Set) — only
+    // possible with two independent async dispatcher threads. Per
+    // Serilog's own documented two-phase-bootstrap pattern,
+    // Host.UseSerilog automatically replaces Log.Logger with the
+    // fully-configured instance, collapsing this back down to exactly
+    // one pipeline, one dedicated thread, shared by every static call
+    // and every injected ILogger<T> alike. See ToDo18/19.md #11.
+    // ----------------------------------------------------------------
+    builder.Host.UseSerilog((context, services, config) => config
         .ReadFrom.Configuration(builder.Configuration)
         .ReadFrom.Services(services)
         .Enrich.FromLogContext()
-        .WriteTo.Console());
+        .WriteTo.Async(a =>
+        {
+            a.Console();
+            a.File(
+                "logs/server_log-.txt",
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: null); // never auto-delete old days
+        }));
 
     // ----------------------------------------------------------------
     // Configuration binding
@@ -191,6 +279,23 @@ try
     builder.Services.AddSingleton<AGV.Dashboard.Services.DashboardBroadcaster>();
     builder.Services.AddHostedService(sp =>
         sp.GetRequiredService<AGV.Dashboard.Services.DashboardBroadcaster>());
+
+    // ----------------------------------------------------------------
+    // Circuit-level cleanup (9/10 diagnostic session) — MUST be Scoped,
+    // not Singleton. Blazor Server creates one DI scope per circuit, so
+    // a Scoped registration here means each circuit's Dashboard
+    // component and its DashboardCircuitHandler automatically share the
+    // same CircuitCleanupRegistry instance. This gives a reliable
+    // cleanup hook (fires on OnConnectionDownAsync, i.e. promptly on
+    // ANY disconnect including an abrupt hard refresh) as an
+    // alternative to Dashboard.razor's DisposeAsync, which was
+    // confirmed via instance-ID logging to NOT fire reliably on hard
+    // refresh — see ToDo14.md #11 for the full diagnostic history.
+    // ----------------------------------------------------------------
+    builder.Services.AddScoped<AGV.Dashboard.Services.CircuitCleanupRegistry>();
+    builder.Services.AddScoped<
+        Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler,
+        AGV.Dashboard.Services.DashboardCircuitHandler>();
 
     // ----------------------------------------------------------------
     // Vehicle interface � Simulation or Mqtt
@@ -428,3 +533,51 @@ finally
 {
     Log.CloseAndFlush();
 }
+
+// ----------------------------------------------------------------
+// Local function: disable console QuickEdit Mode. See the comment
+// block near the top of this file for the full rationale (9/20
+// diagnostic session).
+// ----------------------------------------------------------------
+static void TryDisableConsoleQuickEdit()
+{
+    try
+    {
+        const int STD_INPUT_HANDLE = -10;
+        const uint ENABLE_QUICK_EDIT_MODE = 0x0040;
+        const uint ENABLE_EXTENDED_FLAGS = 0x0080;
+
+        var consoleHandle = GetStdHandle(STD_INPUT_HANDLE);
+        if (consoleHandle == IntPtr.Zero
+            || consoleHandle == new IntPtr(-1))
+        {
+            return; // no console attached (e.g. running as a Windows Service)
+        }
+
+        if (!GetConsoleMode(consoleHandle, out var mode))
+            return;
+
+        // Clear QuickEdit, but keep ENABLE_EXTENDED_FLAGS set — it
+        // must be set for the mode change to take effect at all, and
+        // clearing it would also disable other extended console
+        // behaviors we don't want to touch.
+        mode &= ~ENABLE_QUICK_EDIT_MODE;
+        mode |= ENABLE_EXTENDED_FLAGS;
+
+        SetConsoleMode(consoleHandle, mode);
+    }
+    catch
+    {
+        // Best-effort only — never let a console-mode tweak prevent
+        // the application from starting.
+    }
+}
+
+[DllImport("kernel32.dll", SetLastError = true)]
+static extern IntPtr GetStdHandle(int nStdHandle);
+
+[DllImport("kernel32.dll")]
+static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+[DllImport("kernel32.dll")]
+static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
