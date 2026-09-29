@@ -45,8 +45,11 @@ namespace AGV.Dashboard.Services
     ///     ConcurrentDictionary reference swapped atomically via
     ///     Interlocked.Exchange (lock-free "grab everything and reset"
     ///     pattern — no Monitor involved at all).
-    ///   - `_selectedVehicleId`: was `int?` + `lock` — now a plain
-    ///     `volatile int` (0 = none), read/written without any lock.
+    ///   - `_selectedVehicleId`: REMOVED 9/28 (#11b). It was a single
+    ///     process-wide value, so one browser's click changed the popup
+    ///     for every connected browser. Selection is now per-circuit,
+    ///     owned by each Dashboard.razor instance, which refreshes its
+    ///     own popup via GetVehicleDetail while the popup is open.
     ///   - `_socHistory`: was a plain, UNSYNCHRONIZED Dictionary<int,
     ///     Queue<...>> — written by one loop, read from at least two
     ///     other call sites (BroadcastSelectedVehicleDetailAsync's loop
@@ -83,12 +86,6 @@ namespace AGV.Dashboard.Services
         private int _tickCount;
         private DateTime _simStartTime = DateTime.UtcNow;
 
-        // Currently selected vehicle for live popup detail streaming.
-        // Was int? behind a lock — now a plain volatile int (0 = none).
-        // Set via SetSelectedVehicle (called directly by Dashboard.razor
-        // on popup open/close — no hub round-trip involved).
-        private volatile int _selectedVehicleId; // 0 = no selection
-
         // ----------------------------------------------------------------
         // In-process event API — see ARCHITECTURE NOTE above.
         // Each event mirrors one of the SignalR broadcasts below and is
@@ -102,7 +99,6 @@ namespace AGV.Dashboard.Services
         public event Action<MissionCounterUpdate>? MissionCountersUpdated;
         public event Action<SimClockUpdate>? SimClockUpdated;
         public event Action<List<AlertUpdate>>? AlertsUpdated;
-        public event Action<VehicleDetailDto>? VehicleDetailUpdated;
         public event Action<int, int?, IReadOnlyList<int>>? VehicleMissionUpdated;
 
         public DashboardBroadcaster(
@@ -132,8 +128,7 @@ namespace AGV.Dashboard.Services
                 BroadcastMissionCountersAsync(stoppingToken),
                 BroadcastSimClockAsync(stoppingToken),
                 BroadcastAlertsAsync(stoppingToken),
-                BroadcastMissionUpdatesAsync(stoppingToken),
-                BroadcastSelectedVehicleDetailAsync(stoppingToken));
+                BroadcastMissionUpdatesAsync(stoppingToken));
         }
 
         // ----------------------------------------------------------------
@@ -309,18 +304,6 @@ namespace AGV.Dashboard.Services
             Interlocked.Add(ref _enqueued, enqueuedDelta);
         }
 
-        // ----------------------------------------------------------------
-        // Selected-vehicle tracking — called directly by Dashboard.razor
-        // on popup open (via OnVehicleClicked) and close (via ClosePopup).
-        // Plain volatile field, no lock — 0 represents "no selection"
-        // since vehicle IDs are always >= 1.
-        // ----------------------------------------------------------------
-
-        public void SetSelectedVehicle(int? vehicleId)
-        {
-            _selectedVehicleId = vehicleId ?? 0;
-        }
-
         private async Task BroadcastSimClockAsync(CancellationToken ct)
         {
             await foreach (var update in
@@ -423,42 +406,6 @@ namespace AGV.Dashboard.Services
                 vehicle.PlannedRouteNodeIds.ToList(),
                 vehicle.CurrentNodeId,
                 socPoints);
-        }
-
-        // ----------------------------------------------------------------
-        // Live popup streaming — pushes UpdateVehicleDetail at 2Hz for
-        // whichever single vehicle is currently selected (popup open).
-        // No-op when no popup is open, so this costs nothing at rest.
-        // ----------------------------------------------------------------
-
-        private async Task BroadcastSelectedVehicleDetailAsync(CancellationToken ct)
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    await Task.Delay(500, ct); // 2 times per second
-
-                    var vehicleId = _selectedVehicleId; // volatile read, no lock
-
-                    if (vehicleId != 0)
-                    {
-                        var detail = GetVehicleDetail(vehicleId);
-                        if (detail is not null)
-                        {
-                            await _hub.Clients.All.SendAsync(
-                                "UpdateVehicleDetail", detail, ct);
-                            VehicleDetailUpdated?.Invoke(detail);
-                        }
-                    }
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex,
-                        "Error broadcasting selected vehicle detail");
-                }
-            }
         }
 
         private async Task BroadcastMissionUpdatesAsync(CancellationToken ct)

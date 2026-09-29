@@ -194,6 +194,12 @@
     private decimal _speedFactor = 60m;
 
     private VehicleDetailDto? _selectedVehicle;
+
+    // #11b (9/28): the selected vehicle used to be ONE process-wide value
+    // on DashboardBroadcaster, so a click in any browser changed the popup
+    // in every connected browser. Selection is now per-circuit: this
+    // instance owns its own popup and refresh loop. Nothing is shared.
+    private System.Threading.CancellationTokenSource? _popupCts;
     private DotNetObjectReference<Dashboard>? _dotNetRef;
 
     private readonly List<AlertUpdate> _alerts = new();
@@ -241,7 +247,6 @@
         Broadcaster.MissionCountersUpdated += HandleMissionCountersUpdated;
         Broadcaster.SimClockUpdated += HandleSimClockUpdated;
         Broadcaster.AlertsUpdated += HandleAlertsUpdated;
-        Broadcaster.VehicleDetailUpdated += HandleVehicleDetailUpdated;
         Broadcaster.VehicleMissionUpdated += HandleVehicleMissionUpdated;
 
         CircuitCleanup.RegisterCleanup(UnsubscribeFromBroadcaster);
@@ -275,11 +280,35 @@
     // InvokeAsync (which also lets us safely await JS interop calls,
     // replacing the previous fire-and-forget Task.Run(() => JS...)
     // pattern with a properly dispatched await).
+    //
+    // NOTE (9/10 diagnostic session): all InvokeAsync calls below are
+    // fire-and-forget — none of them are awaited or otherwise observed
+    // by the caller. If InvokeAsync (or the work inside it) throws for
+    // ANY reason, that exception was previously silently swallowed as
+    // an unobserved Task exception, with nothing logged anywhere. This
+    // is the leading theory for a discovered bug where a circuit's
+    // continuous rendering (map/sim-clock/fleet-grid updates) silently
+    // and permanently stopped functioning while that same circuit's
+    // click-handling kept working perfectly — see ToDo15.md #11.
+    // SafeInvokeAsync below observes and logs any such exception, so
+    // if this happens again, the server log will show exactly which
+    // handler failed and why, instead of silence.
     // ----------------------------------------------------------------
+
+    private void SafeInvokeAsync(Func<Task> work, string handlerName)
+    {
+        var task = InvokeAsync(work);
+        task.ContinueWith(t =>
+        {
+            Logger.LogError(t.Exception, "Unhandled exception in {Handler}'s InvokeAsync — " +
+                "this circuit's continuous rendering may now be silently broken for this " +
+                "event going forward. See ToDo15.md #11.", handlerName);
+        }, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+    }
 
     private void HandleVehicleStatesUpdated(List<VehicleStateDto> batch)
     {
-        InvokeAsync(async () =>
+        SafeInvokeAsync(async () =>
         {
             foreach (var state in batch)
             {
@@ -296,71 +325,60 @@
             }
             await JS.InvokeVoidAsync("fleetMap.updateStates", batch);
             StateHasChanged();
-        });
+        }, nameof(HandleVehicleStatesUpdated));
     }
 
     private void HandleVehiclePositionsUpdated(List<VehiclePositionDto> batch)
     {
-        InvokeAsync(async () =>
+        SafeInvokeAsync(async () =>
         {
             await JS.InvokeVoidAsync("fleetMap.updatePositions", batch);
-        });
+        }, nameof(HandleVehiclePositionsUpdated));
     }
 
     private void HandleMissionCountersUpdated(MissionCounterUpdate counters)
     {
-        InvokeAsync(() =>
+        SafeInvokeAsync(() =>
         {
             _enqueued = counters.Enqueued;
             _dispatched = counters.Dispatched;
             _completed = counters.Completed;
             _queueDepth = counters.QueueDepth;
             StateHasChanged();
-        });
+            return Task.CompletedTask;
+        }, nameof(HandleMissionCountersUpdated));
     }
 
     private void HandleSimClockUpdated(SimClockUpdate clock)
     {
-        InvokeAsync(() =>
+        SafeInvokeAsync(() =>
         {
             _simTime = clock.SimTime;
             _speedFactor = clock.SpeedFactor;
             StateHasChanged();
-        });
+            return Task.CompletedTask;
+        }, nameof(HandleSimClockUpdated));
     }
 
     private void HandleAlertsUpdated(List<AlertUpdate> batch)
     {
-        InvokeAsync(() =>
+        SafeInvokeAsync(() =>
         {
             _alerts.Clear();
             _alerts.AddRange(batch);
             StateHasChanged();
-        });
-    }
-
-    private void HandleVehicleDetailUpdated(VehicleDetailDto detail)
-    {
-        InvokeAsync(() =>
-        {
-            // Downgraded to Debug (9/3): was Information, firing at 2Hz
-            // while any popup is open — a real contributor to Console
-            // sink contention alongside GetVehicleDetail. See
-            // ToDo10.md #11.
-            Logger.LogDebug("UpdateVehicleDetail received: V{VehicleId}", detail.VehicleId);
-            _selectedVehicle = detail;
-            StateHasChanged();
-        });
+            return Task.CompletedTask;
+        }, nameof(HandleAlertsUpdated));
     }
 
     private void HandleVehicleMissionUpdated(
         int vehicleId, int? missionId, IReadOnlyList<int> routeNodeIds)
     {
-        InvokeAsync(async () =>
+        SafeInvokeAsync(async () =>
         {
             await JS.InvokeVoidAsync(
                 "fleetMap.setVehicleRoute", vehicleId, routeNodeIds.ToArray());
-        });
+        }, nameof(HandleVehicleMissionUpdated));
     }
 
     // ----------------------------------------------------------------
@@ -457,8 +475,11 @@
         Broadcaster.MissionCountersUpdated -= HandleMissionCountersUpdated;
         Broadcaster.SimClockUpdated -= HandleSimClockUpdated;
         Broadcaster.AlertsUpdated -= HandleAlertsUpdated;
-        Broadcaster.VehicleDetailUpdated -= HandleVehicleDetailUpdated;
         Broadcaster.VehicleMissionUpdated -= HandleVehicleMissionUpdated;
+
+        // Per-circuit popup refresh loop (#11b) — stop it too, so a
+        // closed circuit doesn't keep polling for a popup nobody sees.
+        StopPopupRefresh();
     }
 
     // ----------------------------------------------------------------
@@ -489,11 +510,11 @@
     public Task OnVehicleClicked(int vehicleId)
     {
         Logger.LogInformation("OnVehicleClicked: V{VehicleId}", vehicleId);
-        Broadcaster.SetSelectedVehicle(vehicleId);
         var detail = Broadcaster.GetVehicleDetail(vehicleId);
         if (detail is not null)
         {
             _selectedVehicle = detail;
+            StartPopupRefresh(vehicleId); // replaces any refresh for a previously clicked vehicle
             StateHasChanged();
         }
         return Task.CompletedTask;
@@ -502,9 +523,72 @@
     [JSInvokable]
     public Task ClosePopup()
     {
+        StopPopupRefresh();
         _selectedVehicle = null;
-        Broadcaster.SetSelectedVehicle(null);
         StateHasChanged();
         return Task.CompletedTask;
+    }
+
+    // ----------------------------------------------------------------
+    // Per-circuit live popup refresh (#11b). Replaces the old shared
+    // DashboardBroadcaster loop that pushed the detail of ONE process-
+    // wide "selected vehicle" to every connected circuit. Runs at 2Hz
+    // only while this circuit's popup is open.
+    // ----------------------------------------------------------------
+
+    private void StartPopupRefresh(int vehicleId)
+    {
+        StopPopupRefresh();
+        var cts = new System.Threading.CancellationTokenSource();
+        _popupCts = cts;
+        _ = RunPopupRefreshAsync(vehicleId, cts.Token);
+    }
+
+    private void StopPopupRefresh()
+    {
+        // Exchange makes this safe to call from the render context
+        // (click/close) and from circuit cleanup on another thread.
+        var cts = System.Threading.Interlocked.Exchange(ref _popupCts, null);
+        if (cts is null) return;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        cts.Dispose();
+    }
+
+    private async Task RunPopupRefreshAsync(
+        int vehicleId, System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new System.Threading.PeriodicTimer(
+                TimeSpan.FromMilliseconds(500));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                try
+                {
+                    var detail = Broadcaster.GetVehicleDetail(vehicleId);
+                    if (detail is null) continue;
+
+                    SafeInvokeAsync(() =>
+                    {
+                        // Skip if the popup was closed or switched to
+                        // another vehicle while this update was queued.
+                        if (!ct.IsCancellationRequested)
+                        {
+                            _selectedVehicle = detail;
+                            StateHasChanged();
+                        }
+                        return Task.CompletedTask;
+                    }, nameof(RunPopupRefreshAsync));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Log and keep going: one bad tick must not silently
+                    // freeze the popup for the rest of its life.
+                    Logger.LogError(ex,
+                        "Popup refresh tick failed for V{VehicleId}", vehicleId);
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* popup closed/switched */ }
     }
 }

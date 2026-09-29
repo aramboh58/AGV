@@ -19,18 +19,24 @@ namespace AGV.Dashboard.Hubs
             _logger = logger;
         }
 
+        // 9/28 (#11b): the shared, process-wide "selected vehicle" was
+        // removed from DashboardBroadcaster (one client's selection
+        // changed every client's popup). The Blazor dashboard no longer
+        // uses this hub for popups at all (per-circuit refresh lives in
+        // Dashboard.razor). This method is now a one-shot snapshot to the
+        // calling connection only — no selection state, no streaming.
         public async Task RequestVehicleDetail(int vehicleId)
         {
             _logger.LogInformation("RequestVehicleDetail ENTER: V{VehicleId}", vehicleId);
-            _broadcaster.SetSelectedVehicle(vehicleId);
             var detail = _broadcaster.GetVehicleDetail(vehicleId);
             await Clients.Caller.SendAsync("UpdateVehicleDetail", detail);
             _logger.LogInformation("RequestVehicleDetail EXIT: V{VehicleId}", vehicleId);
         }
 
+        // Kept as a no-op so any client that still calls it doesn't get
+        // an error. There is no server-side selection to clear anymore.
         public Task ClearVehicleDetail()
         {
-            _broadcaster.SetSelectedVehicle(null);
             return Task.CompletedTask;
         }
     }
