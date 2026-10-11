@@ -101,13 +101,98 @@
     const animTargets = {};
     let animLoopRunning = false;
 
+    // ----------------------------------------------------------------
+    // Stale-display protection (#10b).
+    // The client walks whole server-supplied routes on its own, so after
+    // the server dies (or a hidden tab resumes) vehicles keep moving on
+    // data nobody is confirming. On disconnect we freeze and show a
+    // banner; on reconnect / tab-visible we drop client routes so that
+    // fresh server positions take over.
+    // ----------------------------------------------------------------
+    let displayStale = false;
+
+    function dropClientRoutes() {
+        for (const vid of Object.keys(vehicles)) {
+            const v = vehicles[vid];
+            if (!v) continue;
+            v.routeActive = false;
+            v.routeNodeIds = [];
+            v.routeIndex = 0;
+            v.routeVersion = (v.routeVersion || 0) + 1;   // invalidates pending hops
+            delete animTargets[vid];
+        }
+    }
+
+    function setStaleBanner(show) {
+        let el = document.getElementById('fleet-stale-banner');
+        if (!show) { if (el) el.remove(); return; }
+        if (el) return;
+        el = document.createElement('div');
+        el.id = 'fleet-stale-banner';
+        el.textContent = 'DISCONNECTED \u2014 display is stale, vehicle positions are not live';
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:100000;' +
+            'background:#b91c1c;color:#fff;font:600 14px sans-serif;' +
+            'padding:6px 12px;text-align:center;pointer-events:none;';
+        document.body.appendChild(el);
+    }
+
+    function onDisplayStale() {
+        if (displayStale) return;
+        displayStale = true;
+        animLoopRunning = false;       // loop exits on its next frame
+        setStaleBanner(true);
+        console.log('[fleetMap] connection down - motion frozen');
+    }
+
+    function onDisplayLive() {
+        if (!displayStale) return;
+        displayStale = false;
+        dropClientRoutes();
+        setStaleBanner(false);
+        console.log('[fleetMap] connection up - stale routes dropped');
+    }
+
+    // Chrome pauses rAF in hidden tabs, so route walks stall and later
+    // resume from where they stopped. Resync when the tab is shown again.
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible' && !displayStale) {
+            dropClientRoutes();
+            console.log('[fleetMap] tab visible - stale routes dropped');
+        }
+    });
+
+    // Hook Blazor's reconnection handler once Blazor has started.
+    (function hookReconnect() {
+        const h = window.Blazor && window.Blazor.defaultReconnectionHandler;
+        if (!h || h.__fleetHooked) {
+            if (!h) setTimeout(hookReconnect, 250);
+            return;
+        }
+        h.__fleetHooked = true;
+        const origDown = h.onConnectionDown.bind(h);
+        const origUp = h.onConnectionUp.bind(h);
+        h.onConnectionDown = function (options, error) {
+            onDisplayStale();
+            return origDown(options, error);
+        };
+        h.onConnectionUp = function () {
+            const r = origUp();
+            onDisplayLive();
+            return r;
+        };
+    })();
+
     function startAnimLoop() {
-        if (animLoopRunning) return;
+        if (animLoopRunning || displayStale) return;
         animLoopRunning = true;
         requestAnimationFrame(animLoop);
     }
 
     function animLoop(now) {
+        if (displayStale) {            // disconnected: stop all motion
+            animLoopRunning = false;
+            return;
+        }
         let anyActive = false;
         for (const [vid, target] of Object.entries(animTargets)) {
             const v = vehicles[parseInt(vid)];
