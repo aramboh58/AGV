@@ -40,6 +40,7 @@ namespace AGV.Routing.Services
         private volatile PoseExpandedGraph? _graph;
         private readonly TurnCostTable _turnCosts;
         private readonly ILogger<AStarRoutingEngine> _logger;
+        private readonly TopologyVersionManager _versionManager;
 
         // Maximum number of nodes to expand before giving up
         // Prevents runaway search on degenerate topologies
@@ -47,14 +48,16 @@ namespace AGV.Routing.Services
 
         public AStarRoutingEngine(
             TurnCostTable turnCosts,
+            TopologyVersionManager versionManager,
             ILogger<AStarRoutingEngine> logger)
         {
             _turnCosts = turnCosts
                 ?? throw new ArgumentNullException(nameof(turnCosts));
+            _versionManager = versionManager
+                ?? throw new ArgumentNullException(nameof(versionManager));
             _logger = logger
                 ?? throw new ArgumentNullException(nameof(logger));
         }
-
         // ----------------------------------------------------------------
         // IRoutingEngine implementation
         // ----------------------------------------------------------------
@@ -70,9 +73,18 @@ namespace AGV.Routing.Services
             var graph = _graph;
             if (graph is null)
             {
-                _logger.LogWarning(
-                    "Route requested but no topology loaded. " +
-                    "VehicleId={VehicleId}", vehicleId);
+                if (_versionManager.IsLoaded)
+                {
+                    _logger.LogWarning(
+                        "Route requested but no topology loaded in routing engine. " +
+                        "VehicleId={VehicleId}", vehicleId);
+                }
+                else
+                {
+                    _logger.LogDebug(
+                        "Route requested before topology loaded. VehicleId={VehicleId}",
+                        vehicleId);
+                }
                 return null;
             }
 

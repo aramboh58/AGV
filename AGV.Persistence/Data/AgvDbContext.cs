@@ -77,8 +77,8 @@ namespace AGV.Persistence.Data
             ConfigureLocation(modelBuilder);
             ConfigureLocationAssignment(modelBuilder);
             ConfigureVehicle(modelBuilder);
-            ConfigureVehicleFactSheet(modelBuilder);
-            ConfigureMission(modelBuilder);
+            modelBuilder.Entity<Vehicle>().Ignore(v => v.PlannedRouteNodeIds);
+            ConfigureVehicleFactSheet(modelBuilder); ConfigureMission(modelBuilder);
             ConfigureHistory(modelBuilder);
             ConfigureRoadmapVersion(modelBuilder);
         }

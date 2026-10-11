@@ -16,7 +16,7 @@ namespace AGV.Core.Messages
     ///   — FleetManagerService (triggers base/horizon extension evaluation)
     ///   — DashboardHub (forwards to SignalR clients for map update)
     /// </summary>
-    public sealed class VehiclePositionUpdate
+    public sealed class  VehiclePositionUpdate
     {
         /// <summary>Vehicle that reported the position.</summary>
         public int VehicleId { get; init; }
@@ -50,7 +50,13 @@ namespace AGV.Core.Messages
         /// </summary>
         public decimal Y { get; init; }
 
+        /// <summary>Current vehicle heading in degrees.</summary>
+        public decimal Heading { get; init; }
+
         /// <summary>UTC timestamp when this update was received.</summary>
         public DateTime ReceivedAt { get; init; } = DateTime.UtcNow;
     }
+
+    public record MissionCounterUpdate(int Enqueued, int Dispatched, int Completed, int QueueDepth);
+    public record SimClockUpdate(string SimTime, decimal SpeedFactor, long TickCount);
 }

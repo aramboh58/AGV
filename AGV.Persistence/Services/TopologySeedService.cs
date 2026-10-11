@@ -15,6 +15,7 @@ using AGV.Persistence.Entities;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AGV.Persistence.Services
 {
@@ -33,12 +34,29 @@ namespace AGV.Persistence.Services
         private const int SeedVersionId = 1;
         private const string MapId = "NYT_COLLEGE_POINT_V1";
 
+        // Operation type IDs
+        private const int OpTypePick = 1;
+        private const int OpTypeDrop = 2;
+        private const int OpTypeCharge = 3;
+        private const int OpTypePark = 4;
+
+        // Location type IDs
+        private const int LocTypeRoll = 1;
+        private const int LocTypeWasteBin = 2;
+        private const int LocTypeCharge = 3;
+
+        private const int LocationVersionId = 1;
+
+        private readonly Dictionary<string, decimal> _initialSoc;
+
         public TopologySeedService(
             AgvDbContext db,
-            ILogger<TopologySeedService> logger)
+            ILogger<TopologySeedService> logger,
+            Dictionary<string, decimal> initialSoc)
         {
             _db = db;
             _logger = logger;
+            _initialSoc = initialSoc;
         }
 
         public async Task SeedIfEmptyAsync(
@@ -142,8 +160,21 @@ namespace AGV.Persistence.Services
             await _db.Set<RoadmapVersionRecord>()
                 .AddAsync(version, cancellationToken);
 
+            // Insert locations and assignments
+            var locationData = BuildLocations(nodeIdMap);
+            foreach (var (loc, asgn) in locationData)
+            {
+                await _db.Set<Location>().AddAsync(loc, cancellationToken);
+                await _db.Set<LocationAssignment>()
+                    .AddAsync(asgn, cancellationToken);
+            }
+
+            _logger.LogInformation(
+                "Locations seeded: {Count} locations with assignments.",
+                locationData.Count);
+
             // Insert vehicle fleet
-            var vehicles = BuildFleet();
+            var vehicles = BuildFleet(nodeIdMap, _initialSoc);
             await _db.Set<Vehicle>().AddRangeAsync(vehicles, cancellationToken);
 
             _logger.LogInformation(
@@ -154,6 +185,90 @@ namespace AGV.Persistence.Services
             _logger.LogInformation(
                 "Topology seeded: {Nodes} nodes, {Moves} moves.",
                 nodes.Count, moves.Count);
+        }
+
+        private static List<(Location location, LocationAssignment assignment)>
+            BuildLocations(IReadOnlyDictionary<string, int> nodeIdMap)
+        {
+            var result = new List<(Location, LocationAssignment)>();
+            int locationId = 1;
+            int assignmentId = 1;
+
+            // Staging pickup positions (STG01-STG03) — Roll pick
+            foreach (var key in new[] { "STG01", "STG02", "STG03" })
+            {
+                if (!nodeIdMap.TryGetValue(key, out var nodeId)) continue;
+
+                var loc = new Location(
+                    locationId,
+                    LocationVersionId,
+                    $"Roll Staging Pickup {key}",
+                    $"Roll pickup staging position {key}");
+
+                var asgn = new LocationAssignment(
+                    assignmentId,
+                    LocationVersionId,
+                    locationId,
+                    nodeId,
+                    OpTypePick,
+                    LocTypeRoll);
+
+                result.Add((loc, asgn));
+                locationId++;
+                assignmentId++;
+            }
+
+            // Lower press stands LPS01-LPS18 approach nodes — Roll drop
+            for (int i = 1; i <= 18; i++)
+            {
+                var key = $"LPS{i:D2}A";
+                if (!nodeIdMap.TryGetValue(key, out var nodeId)) continue;
+
+                var loc = new Location(
+                    locationId,
+                    LocationVersionId,
+                    $"Lower Press Stand {i}",
+                    $"Lower corridor press stand {i} delivery position");
+
+                var asgn = new LocationAssignment(
+                    assignmentId,
+                    LocationVersionId,
+                    locationId,
+                    nodeId,
+                    OpTypeDrop,
+                    LocTypeRoll);
+
+                result.Add((loc, asgn));
+                locationId++;
+                assignmentId++;
+            }
+
+            // Upper press stands UPS01-UPS12 approach nodes — Roll drop
+            for (int i = 1; i <= 12; i++)
+            {
+                var key = $"UPS{i:D2}A";
+                if (!nodeIdMap.TryGetValue(key, out var nodeId)) continue;
+
+                var loc = new Location(
+                    locationId,
+                    LocationVersionId,
+                    $"Upper Press Stand {i}",
+                    $"Upper corridor press stand {i} delivery position");
+
+                var asgn = new LocationAssignment(
+                    assignmentId,
+                    LocationVersionId,
+                    locationId,
+                    nodeId,
+                    OpTypeDrop,
+                    LocTypeRoll);
+
+                result.Add((loc, asgn));
+                locationId++;
+                assignmentId++;
+            }
+
+            return result;
         }
 
         // ----------------------------------------------------------------
@@ -211,30 +326,79 @@ namespace AGV.Persistence.Services
             public double MaxSpeed { get; set; }
             public bool Bidirectional { get; set; }
         }
-        private static List<Vehicle> BuildFleet()
+        private static List<Vehicle> BuildFleet(
+            IReadOnlyDictionary<string, int> nodeIdMap,
+            Dictionary<string, decimal> initialSoc)
         {
             var vehicles = new List<Vehicle>();
+
+            // Initial node assignments from Python PoC config.py
+            var initialNodes = new Dictionary<int, string>
+            {
+                [1] = "LI_03",
+                [2] = "LI_05",
+                [3] = "LI_07",
+                [4] = "LI_09",
+                [5] = "LI_11",
+                [6] = "LI_13",
+                [7] = "LO_04",
+                [8] = "LO_06",
+                [9] = "UI_02",
+                [10] = "UI_04",
+                [11] = "UI_06",
+                [12] = "UI_08",
+                [13] = "UO_03",
+                [14] = "UO_05",
+                [15] = "UO_07",
+                [16] = "MC01",
+                [17] = "LO_02",
+                [18] = "LO_08",
+                [19] = "LO_12",
+                [20] = "LI_14",
+            };
 
             // 16 fork vehicles: F01-F16
             for (int i = 1; i <= 16; i++)
             {
-                vehicles.Add(new Vehicle(
+                var vehicle = new Vehicle(
                     vehicleId: i,
                     vehicleName: $"F{i:D2}",
                     serialNumber: $"SN-F{i:D2}",
                     vehicleType: VehicleType.Fork,
-                    initialMapId: "NYT_COLLEGE_POINT_V1"));
+                    initialMapId: MapId);
+
+                if (initialNodes.TryGetValue(i, out var nodeName)
+                    && nodeIdMap.TryGetValue(nodeName, out var nodeId))
+                {
+                    vehicle.UpdatePosition(nodeId, MapId);
+                }
+
+                if (initialSoc.TryGetValue(vehicle.VehicleName, out var soc))
+                    vehicle.UpdateBattery(soc);
+
+                vehicles.Add(vehicle);
             }
 
             // 4 waste vehicles: W01-W04
             for (int i = 1; i <= 4; i++)
             {
-                vehicles.Add(new Vehicle(
+                var vehicle = new Vehicle(
                     vehicleId: 16 + i,
                     vehicleName: $"W{i:D2}",
                     serialNumber: $"SN-W{i:D2}",
                     vehicleType: VehicleType.WasteBin,
-                    initialMapId: "NYT_COLLEGE_POINT_V1"));
+                    initialMapId: MapId);
+
+                if (initialNodes.TryGetValue(16 + i, out var nodeName)
+                    && nodeIdMap.TryGetValue(nodeName, out var nodeId))
+                {
+                    vehicle.UpdatePosition(nodeId, MapId);
+                }
+
+                if (initialSoc.TryGetValue(vehicle.VehicleName, out var soc))
+                    vehicle.UpdateBattery(soc);
+
+                vehicles.Add(vehicle);
             }
 
             return vehicles;

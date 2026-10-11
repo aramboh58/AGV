@@ -124,14 +124,13 @@ namespace AGV.Core.Entities
         /// Returns true if vehicles may stop on this node.
         /// </summary>
         public bool IsStoppable
-            => NodeType == NodeType.StopNode;
+            => NodeType == NodeType.StopNode || NodeType == NodeType.DestinationOnly;
 
         /// <summary>
         /// Returns true if the routing engine may use this node as a
         /// through-node when calculating paths (not just as a destination).
         /// </summary>
-        public bool IsRouteable
-            => NodeType != NodeType.DestinationOnly && !IsDeleted;
+        public bool IsRouteable => !IsDeleted;
 
         public override string ToString()
             => $"Node[{NodeId}] {NodeName ?? "(unnamed)"} " +

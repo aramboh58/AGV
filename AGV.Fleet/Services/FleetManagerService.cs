@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using AGV.Core.Entities;
@@ -43,18 +44,22 @@ namespace AGV.Fleet.Services
         private readonly ITrafficManager _traffic;
         private readonly IChargeQueueManager _charging;
         private readonly ICustomizationApi _customization;
+        private readonly IVehicleAdapter _adapter;
         private readonly ILogger _logger;
         private readonly ILogger _dispatchLogger;
+
+        // Signals the dispatch loop that new missions are available
+        private readonly SemaphoreSlim _dispatchSignal = new(0, int.MaxValue);
+
+        private int _nextMissionId = 0;
 
         // Completed mission counter for metrics
         private int _completedMissions;
         private int _transferredMissions;
         private int _swappedMissions;
 
-        // Dispatch evaluation interval
-        private readonly TimeSpan _dispatchInterval =
-            TimeSpan.FromMilliseconds(500);
-
+        private int _enqueuedMissions;
+        private int _dispatchedMissions;
         public FleetManagerService(
             VehicleRegistry registry,
             MissionQueueService missionQueue,
@@ -63,6 +68,7 @@ namespace AGV.Fleet.Services
             ITrafficManager traffic,
             IChargeQueueManager charging,
             ICustomizationApi customization,
+            IVehicleAdapter adapter,
             ILoggerFactory loggerFactory)
         {
             _registry = registry;
@@ -72,6 +78,7 @@ namespace AGV.Fleet.Services
             _traffic = traffic;
             _charging = charging;
             _customization = customization;
+            _adapter = adapter;
             _logger = loggerFactory.CreateLogger(LogDomains.Fleet);
             _dispatchLogger = loggerFactory.CreateLogger(LogDomains.Dispatch);
         }
@@ -91,8 +98,10 @@ namespace AGV.Fleet.Services
             var swapTask = ConsumeMissionSwapsAsync(stoppingToken);
             var dispatchTask = RunDispatchLoopAsync(stoppingToken);
 
+            var decisionTask = ConsumeDispatchDecisionsAsync(stoppingToken);
+
             await Task.WhenAll(stateTask, transferTask,
-                               swapTask, dispatchTask);
+                               swapTask, dispatchTask, decisionTask);
 
             _logger.LogInformation("FleetManagerService stopped");
         }
@@ -121,7 +130,17 @@ namespace AGV.Fleet.Services
             var context = await _customization.OnMissionCreatedAsync(
                 missionContext, cancellationToken);
 
+            var id = Interlocked.Increment(ref _nextMissionId);
+            context = context with { MissionId = id };
+
             _missionQueue.Enqueue(context);
+            Interlocked.Increment(ref _enqueuedMissions);
+            await _channels.MissionCounters.Writer.WriteAsync(
+                new MissionCounterUpdate(
+                    _enqueuedMissions, _dispatchedMissions, _completedMissions,
+                    _missionQueue.Count),
+                cancellationToken);
+            _dispatchSignal.Release(); // wakee dispatch loop
 
             _dispatchLogger.LogInformation(
                 "Mission {MissionId} enqueued " +
@@ -238,20 +257,34 @@ namespace AGV.Fleet.Services
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                await Task.Delay(_dispatchInterval, stoppingToken);
-                if (stoppingToken.IsCancellationRequested) break;
+                try
+                {
+                    // Wait for a mission signal OR periodic wake for charging eval
+                    await _dispatchSignal.WaitAsync(
+                        TimeSpan.FromSeconds(5), stoppingToken);
 
-                // Escalate missions approaching deadline
-                EscalateApproachingDeadlines();
+                    if (stoppingToken.IsCancellationRequested) break;
 
-                // Try to dispatch pending missions
-                await TryDispatchPendingMissionsAsync(stoppingToken);
+                    // Escalate missions approaching deadline
+                    EscalateApproachingDeadlines();
 
-                // Evaluate charging needs for idle vehicles
-                await EvaluateChargingAsync(stoppingToken);
+                    // Evaluate charging needs for idle vehicles
+                    await TryDispatchPendingMissionsAsync(stoppingToken);
+
+                    // Evaluate charging needs for idle vehicles
+                    await EvaluateChargingAsync(stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Dispatch loop iteration failed — continuing");
+                }
             }
         }
-
         private async Task TryDispatchPendingMissionsAsync(
             CancellationToken stoppingToken)
         {
@@ -260,81 +293,106 @@ namespace AGV.Fleet.Services
                 var mission = _missionQueue.Peek();
                 if (mission is null) break;
 
-                var vehicle = SelectBestVehicle(mission);
-                if (vehicle is null)
-                {
-                    // No vehicle available — stop trying for now
-                    break;
-                }
+                var candidates = SelectCandidateVehicles(mission);
+                if (candidates.Count == 0) break;
 
-                // Dequeue now that we have a vehicle
-                _missionQueue.Dequeue();
-
-                // Plan route
                 var blockedNodes = _traffic.GetLockedNodeIds();
                 var blockedMoves = _traffic.GetLockedMoveIds();
 
-                var route = await _routing.FindRouteAsync(
-                    vehicle.CurrentNodeId ?? 0,
-                    mission.PickupNodeId,
-                    vehicle.VehicleId,
-                    blockedNodes,
-                    blockedMoves,
-                    stoppingToken);
-
-                if (route is null)
+                bool dispatched = false;
+                foreach (var vehicle in candidates)
                 {
-                    _dispatchLogger.LogWarning(
-                        "No route found for vehicle {VehicleId} " +
-                        "to mission {MissionId} pickup {NodeId} — " +
-                        "re-queuing",
+                    var route = await _routing.FindRouteAsync(
+                        vehicle.CurrentNodeId ?? 0,
+                        mission.PickupNodeId,
+                        vehicle.VehicleId,
+                        blockedNodes,
+                        blockedMoves,
+                        stoppingToken);
+
+                    if (route is null)
+                    {
+                        _dispatchLogger.LogWarning(
+                            "No route found for vehicle {VehicleId} " +
+                            "to mission {MissionId} pickup {NodeId} — trying next candidate",
+                            vehicle.VehicleId,
+                            mission.MissionId,
+                            mission.PickupNodeId);
+                        continue;
+                    }
+
+                    // Route found — dequeue and dispatch
+                    _missionQueue.Dequeue();
+
+                    _dispatchLogger.LogInformation(
+                        "Dispatching vehicle {VehicleId} from node {NodeId} to pickup {PickupNodeId}",
+                        vehicle.VehicleId,
+                        vehicle.CurrentNodeId,
+                        mission.PickupNodeId);
+
+                    vehicle.AssignMission(
+                        mission.MissionId,
+                        route.Nodes.Select(n => n.NodeId).ToList().AsReadOnly());
+                    Interlocked.Increment(ref _dispatchedMissions);
+                    await _channels.MissionCounters.Writer.WriteAsync(
+                        new MissionCounterUpdate(
+                            _enqueuedMissions, _dispatchedMissions, _completedMissions,
+                            _missionQueue.Count),
+                        stoppingToken);
+                    vehicle.UpdateState(
+                        ActivityState.TravelingToPickup,
+                        OrderState.Waiting);
+                    var dispatchedMission = mission with
+                    {
+                        CurrentVehicleId = vehicle.VehicleId,
+                        CurrentOrderId = Guid.NewGuid()
+                            .ToString("N")[..8].ToUpper()
+                    };
+                    var decision = new MissionDispatchDecision
+                    {
+                        MissionId = mission.MissionId,
+                        OrderId = dispatchedMission.CurrentOrderId,
+                        VehicleId = vehicle.VehicleId,
+                        SerialNumber = vehicle.SerialNumber,
+                        RouteNodeIds = route.Nodes
+                            .Select(n => n.NodeId).ToList().AsReadOnly(),
+                        RouteMoveIds = route.MoveIds,
+                        PickupAssignmentId = mission.PickupNodeId,
+                        DropoffAssignmentId = mission.DropNodeId,
+                        EstimatedTravelTimeSeconds =
+                            route.EstimatedTravelTimeSeconds,
+                    };
+                    await _channels.DispatchDecisions.Writer
+                        .WriteAsync(decision, stoppingToken);
+                    await _channels.MissionUpdates.Writer.WriteAsync(
+                        new VehicleMissionUpdate(
+                            vehicle.VehicleId,
+                            mission.MissionId,
+                            vehicle.PlannedRouteNodeIds),
+                        stoppingToken);
+                    _dispatchLogger.LogInformation(
+                        "Dispatched vehicle {VehicleId} → " +
+                        "mission {MissionId} " +
+                        "(ETA {ETA:F0}s, route {Hops} hops)",
                         vehicle.VehicleId,
                         mission.MissionId,
-                        mission.PickupNodeId);
-                    _missionQueue.Enqueue(mission);
+                        route.EstimatedTravelTimeSeconds,
+                        route.Nodes.Count);
+
+                    dispatched = true;
                     break;
                 }
 
-                // Assign mission to vehicle
-                vehicle.AssignMission(mission.MissionId);
-                vehicle.UpdateState(
-                    ActivityState.TravelingToPickup,
-                    OrderState.Waiting);
-
-                var dispatched = mission with
+                if (!dispatched)
                 {
-                    CurrentVehicleId = vehicle.VehicleId,
-                    CurrentOrderId = Guid.NewGuid()
-                        .ToString("N")[..8].ToUpper()
-                };
-
-                // Publish dispatch decision
-                var decision = new MissionDispatchDecision
-                {
-                    MissionId = mission.MissionId,
-                    OrderId = dispatched.CurrentOrderId,
-                    VehicleId = vehicle.VehicleId,
-                    SerialNumber = vehicle.SerialNumber,
-                    RouteNodeIds = route.Nodes
-                        .Select(n => n.NodeId).ToList().AsReadOnly(),
-                    RouteMoveIds = route.MoveIds,
-                    PickupAssignmentId = mission.PickupNodeId,
-                    DropoffAssignmentId = mission.DropNodeId,
-                    EstimatedTravelTimeSeconds =
-                        route.EstimatedTravelTimeSeconds,
-                };
-
-                await _channels.DispatchDecisions.Writer
-                    .WriteAsync(decision, stoppingToken);
-
-                _dispatchLogger.LogInformation(
-                    "Dispatched vehicle {VehicleId} → " +
-                    "mission {MissionId} " +
-                    "(ETA {ETA:F0}s, route {Hops} hops)",
-                    vehicle.VehicleId,
-                    mission.MissionId,
-                    route.EstimatedTravelTimeSeconds,
-                    route.Nodes.Count);
+                    _dispatchLogger.LogWarning(
+                        "No vehicle could route to mission {MissionId} pickup {NodeId} — re-queuing",
+                        mission.MissionId,
+                        mission.PickupNodeId);
+                    _missionQueue.Dequeue();
+                    _missionQueue.Enqueue(mission);
+                    break;
+                }
             }
         }
 
@@ -346,6 +404,7 @@ namespace AGV.Fleet.Services
             VehicleStateUpdate update,
             CancellationToken stoppingToken)
         {
+
             var vehicle = _registry.GetBySerialNumber(update.SerialNumber);
             if (vehicle is null)
             {
@@ -353,6 +412,19 @@ namespace AGV.Fleet.Services
                     "State update for unknown serial {Serial}",
                     update.SerialNumber);
                 return;
+            }
+
+            // Don't downgrade from an active dispatch state
+            if (update.ActivityState == ActivityState.Idle
+                && update.OrderState == OrderState.Idle
+                && vehicle.OrderState == OrderState.Waiting
+                && update.OrderState != OrderState.Finished)
+            {
+                _logger.LogDebug(
+                    "Guard fired: Activity={Act} Order={Ord} VehicleOrder={VOrd}",
+                    update.ActivityState, update.OrderState, vehicle.OrderState);
+
+                return; // stale idle report — order is in-flight
             }
 
             // Update vehicle state
@@ -375,15 +447,29 @@ namespace AGV.Fleet.Services
             }
 
             // Mission completion detection
+            _logger.LogDebug(
+                "CompletionCheck: Vehicle={VehicleId} UpdateOrder={UOrd} MissionId={Mid}",
+                vehicle.VehicleId, update.OrderState, vehicle.CurrentMissionId);
+
+            // Mission completion detection
             if (update.OrderState == OrderState.Finished
                 && vehicle.CurrentMissionId.HasValue)
             {
                 vehicle.ClearMission();
-                Interlocked.Increment(ref _completedMissions);
-                _dispatchLogger.LogInformation(
-                    "Vehicle {VehicleId} completed mission — " +
-                    "total completed: {Total}",
+                await _channels.MissionUpdates.Writer.WriteAsync(
+                    new VehicleMissionUpdate(
+                        vehicle.VehicleId,
+                        null,
+                        Array.Empty<int>()),
+                    stoppingToken);
+                Interlocked.Increment(ref _completedMissions); _dispatchLogger.LogInformation(
+                    "Vehicle {VehicleId} completed mission — total completed: {Total}",
                     vehicle.VehicleId, _completedMissions);
+                await _channels.MissionCounters.Writer.WriteAsync(
+                    new MissionCounterUpdate(
+                        _enqueuedMissions, _dispatchedMissions, _completedMissions,
+                        _missionQueue.Count),
+                    stoppingToken);
             }
 
             await Task.CompletedTask;
@@ -472,23 +558,22 @@ namespace AGV.Fleet.Services
         // Vehicle selection
         // ----------------------------------------------------------------
 
-        private Vehicle? SelectBestVehicle(MissionContext mission)
+        private List<Vehicle> SelectCandidateVehicles(MissionContext mission)
         {
             var candidates = _registry.GetAvailableForDispatch()
-                .Where(v => !v.BatteryStateOfCharge
-                    .Equals(_charging.GetThresholds().MandatoryEnterSoc)
-                    && v.BatteryStateOfCharge >
+                .Where(v => v.BatteryStateOfCharge >
                     _charging.GetThresholds().MandatoryEnterSoc)
                 .ToList();
 
-            if (candidates.Count == 0) return null;
+            _logger.LogInformation(
+                "SelectCandidateVehicles: {Total} registered, {Available} available for dispatch, {Candidates} above SOC threshold",
+                _registry.Count,
+                _registry.GetAvailableForDispatch().Count,
+                candidates.Count);
 
-            // Select closest vehicle by current node proximity
-            // Full travel-time based selection in Phase 2 order stealing
-            var pickupNodeId = mission.PickupNodeId;
             return candidates
                 .OrderByDescending(v => v.BatteryStateOfCharge)
-                .FirstOrDefault();
+                .ToList();
         }
 
         // ----------------------------------------------------------------
@@ -575,6 +660,36 @@ namespace AGV.Fleet.Services
                         Priority = MissionPriority.Normal,
                     }
                 }, stoppingToken);
+        }
+        private async Task ConsumeDispatchDecisionsAsync(
+            CancellationToken stoppingToken)
+        {
+            await foreach (var decision in
+                _channels.DispatchDecisions.Reader
+                    .ReadAllAsync(stoppingToken))
+            {
+                var order = new VehicleOrder
+                {
+                    OrderId = decision.OrderId,
+                    OrderUpdateId = 1,
+                    Nodes = decision.RouteNodeIds
+                        .Select((nodeId, i) => new OrderNode
+                        {
+                            NodeId = nodeId.ToString(),
+                            SequenceId = i,
+                            Released = true,
+                            X = 0m,
+                            Y = 0m,
+                            MapId = string.Empty,
+                            Actions = Array.Empty<OrderAction>(),
+                        })
+                        .ToList(),
+                    Edges = Array.Empty<OrderEdge>().ToList(),
+                };
+
+                await _adapter.SendOrderAsync(
+                    decision.SerialNumber, order, stoppingToken);
+            }
         }
     }
 }

@@ -107,16 +107,27 @@ namespace AGV.Fleet.Services
         public void InitializeOpportunitySlots(
             IEnumerable<int> slotNodeIds)
         {
+            // 9/20 diagnostic session: logging moved outside every
+            // lock block in this file. Live debugger evidence found a
+            // thread holding an application lock (in a sibling
+            // service, MissionQueueService) while stuck on a slow/
+            // stuck log write — every other thread needing that lock
+            // piled up behind it. Same anti-pattern was present
+            // throughout this file (6 call sites); fixed uniformly.
+            // See MissionQueueService.cs and TrafficManagerService.cs
+            // for the full incident writeup.
+            int count;
             lock (_chargeLock)
             {
                 _opportunitySlots.Clear();
                 foreach (var nodeId in slotNodeIds)
                     _opportunitySlots[nodeId] = null;
-
-                _logger.LogInformation(
-                    "Opportunity charge slots initialized: {Count}",
-                    _opportunitySlots.Count);
+                count = _opportunitySlots.Count;
             }
+
+            _logger.LogInformation(
+                "Opportunity charge slots initialized: {Count}",
+                count);
         }
 
         /// <summary>
@@ -125,16 +136,18 @@ namespace AGV.Fleet.Services
         public void InitializeMandatoryStations(
             IEnumerable<int> stationNodeIds)
         {
+            int count;
             lock (_chargeLock)
             {
                 _mandatorySlots.Clear();
                 foreach (var nodeId in stationNodeIds)
                     _mandatorySlots[nodeId] = null;
-
-                _logger.LogInformation(
-                    "Mandatory charge stations initialized: {Count}",
-                    _mandatorySlots.Count);
+                count = _mandatorySlots.Count;
             }
+
+            _logger.LogInformation(
+                "Mandatory charge stations initialized: {Count}",
+                count);
         }
 
         // ----------------------------------------------------------------
@@ -198,75 +211,112 @@ namespace AGV.Fleet.Services
             int vehicleId,
             CancellationToken cancellationToken = default)
         {
+            int? assignedNode = null;
+            int? queueDepthIfQueued = null;
+
             lock (_chargeLock)
             {
                 // Check if already assigned
                 var existing = GetVehicleChargeSlot(vehicleId);
                 if (existing.HasValue)
-                    return Task.FromResult<int?>(existing.Value);
-
-                // Find first free slot
-                foreach (var kvp in _opportunitySlots)
                 {
-                    if (kvp.Value is null)
+                    assignedNode = existing;
+                }
+                else
+                {
+                    // Find first free slot
+                    foreach (var kvp in _opportunitySlots)
                     {
-                        _opportunitySlots[kvp.Key] = vehicleId;
-                        _logger.LogInformation(
-                            "Vehicle {VehicleId} assigned opportunity " +
-                            "charge slot {NodeId}",
-                            vehicleId, kvp.Key);
-                        return Task.FromResult<int?>(kvp.Key);
+                        if (kvp.Value is null)
+                        {
+                            _opportunitySlots[kvp.Key] = vehicleId;
+                            assignedNode = kvp.Key;
+                            break;
+                        }
+                    }
+
+                    if (assignedNode is null
+                        && !_opportunityWaitQueue.Contains(vehicleId))
+                    {
+                        _opportunityWaitQueue.Enqueue(vehicleId);
+                        queueDepthIfQueued = _opportunityWaitQueue.Count;
                     }
                 }
-
-                // No slot available — add to wait queue
-                if (!_opportunityWaitQueue.Contains(vehicleId))
-                {
-                    _opportunityWaitQueue.Enqueue(vehicleId);
-                    _logger.LogInformation(
-                        "Vehicle {VehicleId} queued for opportunity " +
-                        "charge (queue depth: {Depth})",
-                        vehicleId, _opportunityWaitQueue.Count);
-                }
-
-                return Task.FromResult<int?>(null);
             }
+
+            if (assignedNode.HasValue)
+            {
+                _logger.LogInformation(
+                    "Vehicle {VehicleId} assigned opportunity " +
+                    "charge slot {NodeId}",
+                    vehicleId, assignedNode.Value);
+            }
+            else if (queueDepthIfQueued.HasValue)
+            {
+                _logger.LogInformation(
+                    "Vehicle {VehicleId} queued for opportunity " +
+                    "charge (queue depth: {Depth})",
+                    vehicleId, queueDepthIfQueued.Value);
+            }
+
+            return Task.FromResult(assignedNode);
         }
 
         public Task<int?> RequestMandatoryStationAsync(
             int vehicleId,
             CancellationToken cancellationToken = default)
         {
+            int? assignedNode = null;
+            bool allOccupied = false;
+            int occupiedCount = 0;
+
             lock (_chargeLock)
             {
                 var existing = GetVehicleChargeSlot(vehicleId);
                 if (existing.HasValue)
-                    return Task.FromResult<int?>(existing.Value);
-
-                foreach (var kvp in _mandatorySlots)
                 {
-                    if (kvp.Value is null)
+                    assignedNode = existing;
+                }
+                else
+                {
+                    foreach (var kvp in _mandatorySlots)
                     {
-                        _mandatorySlots[kvp.Key] = vehicleId;
-                        _logger.LogInformation(
-                            "Vehicle {VehicleId} assigned mandatory " +
-                            "charge station {NodeId} " +
-                            "(SOC={SOC}%)",
-                            vehicleId, kvp.Key,
-                            _registry.GetById(vehicleId)
-                                ?.BatteryStateOfCharge
-                                .ToString("F1") ?? "?");
-                        return Task.FromResult<int?>(kvp.Key);
+                        if (kvp.Value is null)
+                        {
+                            _mandatorySlots[kvp.Key] = vehicleId;
+                            assignedNode = kvp.Key;
+                            break;
+                        }
+                    }
+
+                    if (assignedNode is null)
+                    {
+                        allOccupied = true;
+                        occupiedCount = _mandatorySlots.Count;
                     }
                 }
+            }
 
+            if (assignedNode.HasValue)
+            {
+                _logger.LogInformation(
+                    "Vehicle {VehicleId} assigned mandatory " +
+                    "charge station {NodeId} " +
+                    "(SOC={SOC}%)",
+                    vehicleId, assignedNode.Value,
+                    _registry.GetById(vehicleId)
+                        ?.BatteryStateOfCharge
+                        .ToString("F1") ?? "?");
+            }
+            else if (allOccupied)
+            {
                 _logger.LogWarning(
                     "Vehicle {VehicleId} needs mandatory charge " +
                     "but all {Count} stations occupied",
-                    vehicleId, _mandatorySlots.Count);
-
-                return Task.FromResult<int?>(null);
+                    vehicleId, occupiedCount);
             }
+
+            return Task.FromResult(assignedNode);
         }
 
         public Task ReleaseSlotAsync(
@@ -274,47 +324,71 @@ namespace AGV.Fleet.Services
             int chargeNodeId,
             CancellationToken cancellationToken = default)
         {
+            bool releasedOpportunity = false;
+            int? advancedVehicle = null;
+            bool releasedMandatory = false;
+            bool maintenanceCompleted = false;
+
             lock (_chargeLock)
             {
                 // Release opportunity slot
                 if (_opportunitySlots.ContainsKey(chargeNodeId))
                 {
                     _opportunitySlots[chargeNodeId] = null;
-                    _logger.LogInformation(
-                        "Vehicle {VehicleId} released opportunity " +
-                        "charge slot {NodeId}",
-                        vehicleId, chargeNodeId);
+                    releasedOpportunity = true;
 
                     // Advance wait queue
                     if (_opportunityWaitQueue.Count > 0)
                     {
                         var next = _opportunityWaitQueue.Dequeue();
                         _opportunitySlots[chargeNodeId] = next;
-                        _logger.LogInformation(
-                            "Vehicle {VehicleId} advanced from " +
-                            "wait queue to slot {NodeId}",
-                            next, chargeNodeId);
+                        advancedVehicle = next;
                     }
                 }
                 // Release mandatory station
                 else if (_mandatorySlots.ContainsKey(chargeNodeId))
                 {
                     _mandatorySlots[chargeNodeId] = null;
-                    _logger.LogInformation(
-                        "Vehicle {VehicleId} released mandatory " +
-                        "charge station {NodeId}",
-                        vehicleId, chargeNodeId);
+                    releasedMandatory = true;
 
                     // Record maintenance completion if applicable
                     if (_maintenanceScheduled.Contains(vehicleId))
                     {
                         _maintenanceScheduled.Remove(vehicleId);
                         _lastMaintenance[vehicleId] = DateTime.UtcNow;
-                        _logger.LogInformation(
-                            "Vehicle {VehicleId} maintenance " +
-                            "cycle complete",
-                            vehicleId);
+                        maintenanceCompleted = true;
                     }
+                }
+            }
+
+            if (releasedOpportunity)
+            {
+                _logger.LogInformation(
+                    "Vehicle {VehicleId} released opportunity " +
+                    "charge slot {NodeId}",
+                    vehicleId, chargeNodeId);
+
+                if (advancedVehicle.HasValue)
+                {
+                    _logger.LogInformation(
+                        "Vehicle {VehicleId} advanced from " +
+                        "wait queue to slot {NodeId}",
+                        advancedVehicle.Value, chargeNodeId);
+                }
+            }
+            else if (releasedMandatory)
+            {
+                _logger.LogInformation(
+                    "Vehicle {VehicleId} released mandatory " +
+                    "charge station {NodeId}",
+                    vehicleId, chargeNodeId);
+
+                if (maintenanceCompleted)
+                {
+                    _logger.LogInformation(
+                        "Vehicle {VehicleId} maintenance " +
+                        "cycle complete",
+                        vehicleId);
                 }
             }
 
@@ -363,17 +437,24 @@ namespace AGV.Fleet.Services
             int vehicleId,
             CancellationToken cancellationToken = default)
         {
+            bool scheduled = false;
             lock (_chargeLock)
             {
                 if (!_maintenanceScheduled.Contains(vehicleId))
                 {
                     _maintenanceScheduled.Add(vehicleId);
-                    _logger.LogInformation(
-                        "Maintenance cycle scheduled for " +
-                        "vehicle {VehicleId}",
-                        vehicleId);
+                    scheduled = true;
                 }
             }
+
+            if (scheduled)
+            {
+                _logger.LogInformation(
+                    "Maintenance cycle scheduled for " +
+                    "vehicle {VehicleId}",
+                    vehicleId);
+            }
+
             return Task.CompletedTask;
         }
 

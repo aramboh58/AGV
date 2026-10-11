@@ -38,6 +38,7 @@ namespace AGV.Simulation.Services
         private readonly ChannelRegistry _channels;
         private readonly RoadMapGraphHolder _roadMapHolder;
         private RoadMapGraph RoadMap => _roadMapHolder.GetRequired(); private readonly ILoggerFactory _loggerFactory;
+        private readonly BatteryModelOptions _batteryOptions;
         private readonly ILogger _logger;
 
         // Per-vehicle simulation state
@@ -58,11 +59,13 @@ namespace AGV.Simulation.Services
             VehicleRegistry registry,
             ChannelRegistry channels,
             RoadMapGraphHolder roadMapHolder,
+            BatteryModelOptions batteryOptions,
             ILoggerFactory loggerFactory)
         {
             _registry = registry;
             _channels = channels;
             _roadMapHolder = roadMapHolder;
+            _batteryOptions = batteryOptions;
             _loggerFactory = loggerFactory;
             _logger = loggerFactory.CreateLogger(LogDomains.Fleet);
         }
@@ -73,16 +76,37 @@ namespace AGV.Simulation.Services
         // ----------------------------------------------------------------
 
         public Task SendOrderAsync(
-            string serialNumber,
-            VehicleOrder order,
-            CancellationToken cancellationToken = default)
+    string serialNumber,
+    VehicleOrder order,
+    CancellationToken cancellationToken = default)
         {
             var state = GetSimStateBySerial(serialNumber);
             if (state is null) return Task.CompletedTask;
 
-            // Store the order for the simulation engine to execute
+            if (state.PendingOrder is not null
+                && state.CurrentOrderId != order.OrderId
+                && state.NodeIndex < state.PendingOrder.Nodes.Count(n => n.Released) - 1)
+            {
+                _logger.LogWarning(
+                    "SendOrderAsync OVERWRITE: {Serial} had order {OldOrder} " +
+                    "at NodeIndex={Idx}/{Total} — replaced by {NewOrder} before completion",
+                    serialNumber, state.CurrentOrderId, state.NodeIndex,
+                    state.PendingOrder.Nodes.Count(n => n.Released),
+                    order.OrderId);
+            }
+
+            _logger.LogInformation(
+                "SendOrderAsync: {Serial} order {OrderId} — {NodeCount} nodes, {ReleasedCount} released",
+                serialNumber, order.OrderId, order.Nodes.Count,
+                order.Nodes.Count(n => n.Released));
+
             state.PendingOrder = order;
             state.CurrentOrderId = order.OrderId;
+
+            state.NodeIndex = 0;
+            state.TravelProgress = 0;
+            state.StateMachine.TryTransition(ActivityState.TravelingToPickup);
+            state.StateMachine.SetOrderState(OrderState.Waiting);
 
             _logger.LogDebug(
                 "Simulated vehicle {Serial} received order {OrderId} " +
@@ -184,7 +208,7 @@ namespace AGV.Simulation.Services
                     new VehicleStateMachine(
                         vehicle.VehicleId, _loggerFactory),
                     new BatteryModel(
-                        new BatteryModelOptions(),
+                        _batteryOptions,
                         vehicle.BatteryStateOfCharge / 100m));
 
                 _simStates[vehicle.VehicleId] = simState;
@@ -194,6 +218,8 @@ namespace AGV.Simulation.Services
                     .BuildConnectionEvent(vehicle, isOnline: true);
 
                 simState.IsOnline = true;
+                vehicle.SetOnline();
+
                 await _channels.VehicleStateUpdates.Writer
                     .WriteAsync(new VehicleStateUpdate
                     {
@@ -326,9 +352,9 @@ namespace AGV.Simulation.Services
         }
 
         private async Task AdvanceTravelAsync(
-            SimulatedVehicleState state,
-            decimal elapsedSeconds,
-            CancellationToken cancellationToken)
+    SimulatedVehicleState state,
+    decimal elapsedSeconds,
+    CancellationToken cancellationToken)
         {
             var order = state.PendingOrder;
             if (order is null) return;
@@ -347,9 +373,11 @@ namespace AGV.Simulation.Services
                     if (int.TryParse(lastNode.NodeId,
                         out var nodeId))
                     {
+                        // Local sim tracking only. vehicle.CurrentNodeId is
+                        // updated exclusively via ProcessVehicleStateUpdateAsync
+                        // consuming the channel — single ownership, same path
+                        // a real MQTT-connected vehicle's position would take.
                         state.CurrentNodeId = nodeId;
-                        state.Vehicle.UpdatePosition(
-                            nodeId, state.Vehicle.CurrentMapId);
                     }
                 }
 
@@ -358,6 +386,10 @@ namespace AGV.Simulation.Services
                 if (currentActivity == ActivityState.TravelingToPickup
                     || currentActivity == ActivityState.ApproachingStand)
                 {
+                    // TravelingToPickup must pass through ApproachingStand first
+                    if (currentActivity == ActivityState.TravelingToPickup)
+                        state.StateMachine.TryTransition(ActivityState.ApproachingStand);
+
                     state.StateMachine.TryTransition(
                         ActivityState.Picking);
                     state.ForkOperationTimer = 0m;
@@ -367,23 +399,25 @@ namespace AGV.Simulation.Services
                     || currentActivity ==
                     ActivityState.ApproachingDrop)
                 {
+                    if (currentActivity == ActivityState.TravelingLoaded)
+                        state.StateMachine.TryTransition(ActivityState.ApproachingDrop);
+
                     state.StateMachine.TryTransition(
                         ActivityState.Dropping);
+                    state.StateMachine.SetOrderState(OrderState.Running);
                     state.ForkOperationTimer = 0m;
                 }
                 else
                 {
-                    state.StateMachine.TryTransition(
-                        ActivityState.Idle);
+                    state.StateMachine.SetOrderState(OrderState.Finished);
+                    state.StateMachine.TryTransition(ActivityState.Idle);
+                    await PublishStateUpdateAsync(state, cancellationToken);
+                    state.StateMachine.SetOrderState(OrderState.Idle);
                     state.PendingOrder = null;
+                    state.NodeIndex = 0;
                 }
-
                 return;
             }
-
-            // Advance along route
-            state.TravelProgress += (double)elapsedSeconds
-                * SimulationConstants.DefaultSpeedCmPerSec;
 
             // Check if we've reached the next node
             var currentNode = releasedNodes[state.NodeIndex];
@@ -393,6 +427,14 @@ namespace AGV.Simulation.Services
                 && int.TryParse(nextNode.NodeId, out var toId))
             {
                 var move = RoadMap.GetMove(fromId, toId);
+
+                // Use actual move speed instead of fixed constant
+                var speedCmPerSec = move is not null
+                    ? (double)move.Speed.DefaultSpeed * 100.0
+                    : SimulationConstants.DefaultSpeedCmPerSec;
+
+                state.TravelProgress += (double)elapsedSeconds * speedCmPerSec;
+
                 var segmentLengthCm = move is not null
                     ? (double)move.Clothoid.ArcLength
                     : SimulationConstants.DefaultSegmentLengthCm;
@@ -401,9 +443,13 @@ namespace AGV.Simulation.Services
                 {
                     state.TravelProgress -= segmentLengthCm;
                     state.NodeIndex++;
+
+                    // Local sim tracking only — see note above.
                     state.CurrentNodeId = toId;
-                    state.Vehicle.UpdatePosition(
-                        toId, state.Vehicle.CurrentMapId);
+
+                    // Update heading to move's end heading
+                    if (move is not null)
+                        state.CurrentHeading = move.Clothoid.EndHeading;
 
                     // Update interpolated position
                     var node = RoadMap.GetNode(toId);
@@ -428,6 +474,12 @@ namespace AGV.Simulation.Services
                         state.CurrentY = fromNode.Position.Y
                             + (toNode.Position.Y
                                - fromNode.Position.Y) * pct;
+
+                        // Interpolate heading
+                        if (move is not null)
+                            state.CurrentHeading = move.Clothoid.StartHeading
+                                + (move.Clothoid.EndHeading
+                                   - move.Clothoid.StartHeading) * pct;
                     }
                 }
             }
@@ -459,10 +511,15 @@ namespace AGV.Simulation.Services
                 }
                 else // Dropping
                 {
+                    state.StateMachine.SetOrderState(OrderState.Finished);
                     state.StateMachine.TryTransition(ActivityState.Idle);
+                    // Publish the Finished state before resetting to Idle
+                    await PublishStateUpdateAsync(state, cancellationToken);
+                    state.StateMachine.SetOrderState(OrderState.Idle);
                     state.PendingOrder = null;
                     state.CurrentOrderId = string.Empty;
                     state.NodeIndex = 0;
+
                 }
             }
 
@@ -487,10 +544,13 @@ namespace AGV.Simulation.Services
                 LastNodeId = state.CurrentNodeId,
                 OrderUpdateId = 0,
                 Errors = Array.Empty<string>(),
+                VehicleType = state.Vehicle.VehicleType.ToString(),
                 ReceivedAt = DateTime.UtcNow,
             };
 
             await _channels.VehicleStateUpdates.Writer
+                .WriteAsync(update, cancellationToken);
+            await _channels.DashboardStateUpdates.Writer
                 .WriteAsync(update, cancellationToken);
 
             // Publish position update for dashboard
@@ -502,6 +562,7 @@ namespace AGV.Simulation.Services
                 MapId = state.Vehicle.CurrentMapId,
                 X = state.CurrentX,
                 Y = state.CurrentY,
+                Heading = state.CurrentHeading,
                 ReceivedAt = DateTime.UtcNow,
             };
 
@@ -552,6 +613,7 @@ namespace AGV.Simulation.Services
         public int CurrentNodeId { get; set; }
         public decimal CurrentX { get; set; }
         public decimal CurrentY { get; set; }
+        public decimal CurrentHeading { get; set; }
         public string CurrentOrderId { get; set; } = string.Empty;
 
         // Travel state

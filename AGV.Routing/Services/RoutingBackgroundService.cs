@@ -37,6 +37,7 @@ namespace AGV.Routing.Services
         private readonly RuntimeBlockingState _blockingState;
         private readonly TurnCostTable _turnCosts;
         private readonly ILogger _logger;
+        private readonly RoadMapGraphHolder _roadMapHolder;
 
         // Channel for signaling graph rebuild requests
         private readonly System.Threading.Channels.Channel<RebuildRequest>
@@ -47,6 +48,7 @@ namespace AGV.Routing.Services
             TopologyVersionManager versionManager,
             RuntimeBlockingState blockingState,
             TurnCostTable turnCosts,
+            RoadMapGraphHolder roadMapHolder,
             ILoggerFactory loggerFactory)
         {
             _routingEngine = routingEngine
@@ -57,6 +59,7 @@ namespace AGV.Routing.Services
                 ?? throw new ArgumentNullException(nameof(blockingState));
             _turnCosts = turnCosts
                 ?? throw new ArgumentNullException(nameof(turnCosts));
+            _roadMapHolder = roadMapHolder;
             _logger = loggerFactory.CreateLogger(LogDomains.Router);
 
             _rebuildChannel = System.Threading.Channels.Channel
@@ -82,6 +85,7 @@ namespace AGV.Routing.Services
                 // If topology is already loaded, build initial graph
                 if (_versionManager.IsLoaded)
                 {
+                    _activeRoadMap = _roadMapHolder.GetRequired();
                     await RequestRebuildAsync(RebuildReason.InitialLoad);
                 }
 
@@ -112,21 +116,18 @@ namespace AGV.Routing.Services
         // Private
         // ----------------------------------------------------------------
 
+        private RoadMapGraph? _activeRoadMap;
+
         private void OnTopologyVersionChanged(
             object? sender,
             TopologyVersionChangedEventArgs e)
         {
+            _activeRoadMap = e.Graph;
             _ = RequestRebuildAsync(RebuildReason.TopologyVersionChanged);
             _logger.LogInformation(
                 "Topology version changed to v{VersionId} — " +
                 "routing graph rebuild queued",
                 e.NewVersion.VersionId);
-        }
-
-        private async Task RequestRebuildAsync(RebuildReason reason)
-        {
-            await _rebuildChannel.Writer.WriteAsync(
-                new RebuildRequest(reason));
         }
 
         private async Task BuildAndActivateGraphAsync(
@@ -143,6 +144,16 @@ namespace AGV.Routing.Services
                 return;
             }
 
+            var roadMap = _activeRoadMap;
+            if (roadMap is null)
+            {
+                _logger.LogWarning(
+                    "Graph rebuild requested ({Reason}) " +
+                    "but no RoadMapGraph available — skipping",
+                    request.Reason);
+                return;
+            }
+
             _logger.LogInformation(
                 "Building pose-expanded graph " +
                 "(reason: {Reason}, topology: v{VersionId})",
@@ -151,28 +162,19 @@ namespace AGV.Routing.Services
 
             try
             {
-                // Get current blocking state snapshot
                 var blockedNodes = _blockingState.GetBlockedNodeIds();
                 var blockedMoves = _blockingState.GetBlockedMoveIds();
 
-                // We need the active graph from the topology service
-                // This is supplied via the TopologyVersionChanged event
-                // For blocking state rebuilds we need the stored graph
-                // Retrieve via the version manager's event args cache
-                // (stored when topology was last activated)
                 var graph = await Task.Run(() =>
-                {
-                    // The graph is rebuilt from the version manager's
-                    // stored RoadMapGraph — accessed via the event
-                    // The actual RoadMapGraph is held by TopologyService
-                    // We request it via a rebuild trigger
-                    // Note: In production wiring, TopologyService exposes
-                    // GetActiveGraph() — added when Host wires services
-                    return (PoseExpandedGraph?)null; // placeholder
-                }, cancellationToken);
+                    new PoseExpandedGraph(
+                        roadMap,
+                        _turnCosts,
+                        blockedNodes,
+                        blockedMoves),
+                    cancellationToken);
 
-                // Graph will be properly wired in Host DI configuration
-                // For now log the rebuild completion
+                _routingEngine.ActivateGraph(graph);
+
                 _logger.LogInformation(
                     "Pose-expanded graph rebuild complete " +
                     "(reason: {Reason})",
@@ -186,6 +188,11 @@ namespace AGV.Routing.Services
                     "(reason: {Reason})",
                     request.Reason);
             }
+        }
+        private async Task RequestRebuildAsync(RebuildReason reason)
+        {
+            await _rebuildChannel.Writer.WriteAsync(
+                new RebuildRequest(reason));
         }
 
         // ----------------------------------------------------------------

@@ -185,5 +185,8 @@ namespace AGV.Core.Logging
 
         /// <summary>Host startup, shutdown, service registration.</summary>
         public const string Host = "AGV.Host";
+
+        /// <summary>Dashboard broadcasting and SignalR hub events.</summary>
+        public const string Dashboard = "AGV.Dashboard";
     }
 }
