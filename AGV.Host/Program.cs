@@ -359,6 +359,20 @@ try
     // ----------------------------------------------------------------
     var app = builder.Build();
 
+    // ----------------------------------------------------------------
+    // Shutdown markers (10/11). Every run's log used to end abruptly
+    // with no trace of why. A graceful stop (Ctrl+C / SIGTERM / console
+    // close) now writes these lines and then flushes via the finally
+    // block below. A hard kill (VS Stop Debugging, Task Manager,
+    // Stop-Process) still cannot log or flush - if a log ends with no
+    // "stopping" line, the process was killed rather than stopped.
+    // ----------------------------------------------------------------
+    var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+    lifetime.ApplicationStopping.Register(() =>
+        Log.Information("AGV Host stopping (graceful shutdown requested)"));
+    lifetime.ApplicationStopped.Register(() =>
+        Log.Information("AGV Host stopped"));
+
     app.UseStaticFiles();
     app.UseRouting();
     app.MapBlazorHub();
