@@ -69,7 +69,7 @@
     let vpX = 0, vpY = 0;
     let vpW = 1400, vpH = 420;
     const VP_W0 = 1400, VP_H0 = 420;
-    const MAX_ZOOM = 5.0;
+    const MAX_ZOOM = 20.0;   // 4x the previous limit (was 5.0)
     let isDragging = false;
     let dragStartX = 0, dragStartY = 0;
     let vpStartX = 0, vpStartY = 0;
