@@ -77,6 +77,35 @@
     function applyViewBox() {
         const svg = document.getElementById('fleet-map');
         if (svg) svg.setAttribute('viewBox', `${vpX} ${vpY} ${vpW} ${vpH}`);
+        refreshLabelScale();
+    }
+
+    // ----------------------------------------------------------------
+    // Vehicle label size cap (#9).
+    // Labels live in map units, so they grow with the zoom. Up to
+    // LABEL_FULL_SIZE_UP_TO x zoom they scale normally; beyond that they
+    // are shrunk in place so their size on screen stops growing.
+    // The label is scaled about its own anchor point (0,12) so it stays
+    // just below the vehicle.
+    // ----------------------------------------------------------------
+    const LABEL_FULL_SIZE_UP_TO = 5.0;
+    let labelScale = 1;
+
+    function labelTransform(headingDeg) {
+        return `rotate(${-svgHeading(headingDeg)}) translate(0,12) ` +
+               `scale(${labelScale}) translate(0,-12)`;
+    }
+
+    function refreshLabelScale() {
+        const z = VP_W0 / vpW;
+        const s = z > LABEL_FULL_SIZE_UP_TO ? LABEL_FULL_SIZE_UP_TO / z : 1;
+        if (Math.abs(s - labelScale) < 0.001) return;
+        labelScale = s;
+        for (const vid of Object.keys(vehicles)) {
+            const v = vehicles[vid];
+            if (v && v.label)
+                v.label.setAttribute('transform', labelTransform(v.currentHeading));
+        }
     }
 
     function clampPan() {
@@ -208,7 +237,7 @@
             v.currentX = cx;
             v.currentY = cy;
             v.currentHeading = ch;
-            v.label.setAttribute('transform', `rotate(${-svgHeading(ch)})`);
+            v.label.setAttribute('transform', labelTransform(ch));
 
             if (t < 1) {
                 anyActive = true;

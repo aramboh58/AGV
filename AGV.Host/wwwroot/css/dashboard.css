@@ -384,8 +384,8 @@ html, body {
 }
 
 .vehicle-shape {
-    stroke-width: 4;
-    stroke-opacity: 0.35;
+    stroke-width: 3;
+    stroke-opacity: 0.2;
     stroke-linejoin: round;
     paint-order: stroke;
 }
