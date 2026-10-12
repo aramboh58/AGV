@@ -417,6 +417,13 @@
             zoom(factor, mx, my);
         }, { passive: false });
 
+        // Cancel the browser's native drag-and-drop of SVG elements (it
+        // shows a ghost copy of the vehicle). Map panning is our own
+        // mousedown/mousemove handling below and is unaffected.
+        svg.addEventListener('dragstart', function (e) {
+            e.preventDefault();
+        });
+
         svg.addEventListener('mousedown', function (e) {
             if (e.button !== 0) return;
             isDragging = true;

@@ -69,6 +69,18 @@ html, body {
     flex-direction: column;
     height: 100vh;
     background: var(--bg-base);
+    /* Dragging on the map was highlighting page text. Operators don't
+       select dashboard text, so turn selection off... */
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* ...except popup values, which can still be copied (e.g. a mission id). */
+.popup-title,
+.popup-value,
+.route-node {
+    -webkit-user-select: text;
+    user-select: text;
 }
 
 .dash-body {
