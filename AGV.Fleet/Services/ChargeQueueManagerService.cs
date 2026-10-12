@@ -480,10 +480,29 @@ namespace AGV.Fleet.Services
 
             foreach (var vehicle in candidates)
             {
-                _ = EvaluateChargingNeedAsync(
+                _ = ObserveEvaluationAsync(
                     vehicle.VehicleId,
                     vehicle.BatteryStateOfCharge,
                     vehicle.CurrentNodeId ?? 0);
+            }
+        }
+
+        // Fire-and-forget wrapper: the evaluation runs unawaited, so an
+        // exception would otherwise be swallowed unobserved and the
+        // vehicle would silently never get its charging evaluation.
+        private async Task ObserveEvaluationAsync(
+            int vehicleId, decimal currentSoc, int currentNodeId)
+        {
+            try
+            {
+                await EvaluateChargingNeedAsync(
+                    vehicleId, currentSoc, currentNodeId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Charging evaluation failed for vehicle {VehicleId}",
+                    vehicleId);
             }
         }
 
