@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -220,8 +220,15 @@ namespace AGV.Fleet.Services
             int moveId,
             CancellationToken cancellationToken = default)
         {
-            _blockingState.UnblockNode(nodeId);
-            _blockingState.UnblockMove(moveId);
+            // Only the holder may release: a stale release must never
+            // free a resource another vehicle (or an engineer block)
+            // now holds.
+            if (_blockingState.GetNodeBlock(nodeId)?.LockedByVehicleId
+                == vehicleId)
+                _blockingState.UnblockNode(nodeId);
+            if (_blockingState.GetMoveBlock(moveId)?.LockedByVehicleId
+                == vehicleId)
+                _blockingState.UnblockMove(moveId);
 
             _lockLogger.LogDebug(
                 "Vehicle {VehicleId} released lock on " +
@@ -282,6 +289,32 @@ namespace AGV.Fleet.Services
 
         public IReadOnlySet<int> GetVehicleLockedNodeIds(int vehicleId)
             => _blockingState.GetVehicleLockedNodeIds(vehicleId);
+
+        public IReadOnlySet<int> GetVehicleLockedMoveIds(int vehicleId)
+            => _blockingState.GetVehicleLockedMoveIds(vehicleId);
+
+        /// <summary>
+        /// The vehicle currently holding the lock on a node, or null if
+        /// the node is unlocked or blocked by an engineer block.
+        /// </summary>
+        public int? GetNodeHolderVehicleId(int nodeId)
+            => _blockingState.GetNodeBlock(nodeId)?.LockedByVehicleId;
+
+        /// <summary>
+        /// Nodes this vehicle is currently waiting on (contention
+        /// recorded and not yet granted). Used by the dashboard popup.
+        /// </summary>
+        public IReadOnlyList<int> GetVehicleWaitedNodeIds(int vehicleId)
+        {
+            lock (_trafficLock)
+            {
+                return _contentionTicks.Keys
+                    .Where(k => k.Item1 == vehicleId)
+                    .Select(k => k.Item2)
+                    .ToList()
+                    .AsReadOnly();
+            }
+        }
 
         // ----------------------------------------------------------------
         // ITrafficManager — Area occupancy

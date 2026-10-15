@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -38,6 +38,8 @@ namespace AGV.Fleet.Services
         : BackgroundService, IFleetManager
     {
         private readonly VehicleRegistry _registry;
+        private readonly ActiveMissionRegistry _activeMissions;
+        private readonly RouteWindowManager _windows;
         private readonly MissionQueueService _missionQueue;
         private readonly ChannelRegistry _channels;
         private readonly IRoutingEngine _routing;
@@ -62,6 +64,8 @@ namespace AGV.Fleet.Services
         private int _dispatchedMissions;
         public FleetManagerService(
             VehicleRegistry registry,
+            ActiveMissionRegistry activeMissions,
+            RouteWindowManager windows,
             MissionQueueService missionQueue,
             ChannelRegistry channels,
             IRoutingEngine routing,
@@ -72,6 +76,8 @@ namespace AGV.Fleet.Services
             ILoggerFactory loggerFactory)
         {
             _registry = registry;
+            _activeMissions = activeMissions;
+            _windows = windows;
             _missionQueue = missionQueue;
             _channels = channels;
             _routing = routing;
@@ -181,6 +187,7 @@ namespace AGV.Fleet.Services
             if (vehicle is null) return;
 
             // Release all locks immediately
+            _windows.Cancel(vehicleId);
             await _traffic.ReleaseAllLocksAsync(
                 vehicleId, cancellationToken);
 
@@ -348,6 +355,7 @@ namespace AGV.Fleet.Services
                         CurrentOrderId = Guid.NewGuid()
                             .ToString("N")[..8].ToUpper()
                     };
+                    _activeMissions.Set(vehicle.VehicleId, dispatchedMission);
                     var decision = new MissionDispatchDecision
                     {
                         MissionId = mission.MissionId,
@@ -433,8 +441,14 @@ namespace AGV.Fleet.Services
             vehicle.SetLoaded(update.IsLoaded);
 
             if (update.LastNodeId > 0)
+            {
                 vehicle.UpdatePosition(update.LastNodeId,
                     vehicle.CurrentMapId);
+
+                // Slide the lock window as the vehicle reaches nodes
+                await _windows.OnVehicleStateAsync(
+                    vehicle.VehicleId, update.LastNodeId, stoppingToken);
+            }
 
             // Check for connection/error states
             if (update.Errors.Count > 0)
@@ -456,6 +470,7 @@ namespace AGV.Fleet.Services
                 && vehicle.CurrentMissionId.HasValue)
             {
                 vehicle.ClearMission();
+                _activeMissions.Remove(vehicle.VehicleId);
                 await _channels.MissionUpdates.Writer.WriteAsync(
                     new VehicleMissionUpdate(
                         vehicle.VehicleId,
@@ -484,11 +499,13 @@ namespace AGV.Fleet.Services
             CancellationToken stoppingToken)
         {
             // CRITICAL: release all locks FIRST
+            _windows.Cancel(transfer.FromVehicleId);
             await _traffic.ReleaseAllLocksAsync(
                 transfer.FromVehicleId, stoppingToken);
 
             var fromVehicle = _registry.GetById(transfer.FromVehicleId);
             fromVehicle?.ClearMission();
+            _activeMissions.Remove(transfer.FromVehicleId);
 
             var context = transfer.MissionContext;
 
@@ -668,6 +685,19 @@ namespace AGV.Fleet.Services
                 _channels.DispatchDecisions.Reader
                     .ReadAllAsync(stoppingToken))
             {
+                // Sliding lock window: lock ahead and release the route
+                // to the vehicle in stages. Returns false when windowing
+                // is disabled (Traffic:LockWindowNodes = 0) or the route
+                // cannot be windowed; the whole route is then sent at once.
+                if (await _windows.BeginAsync(
+                        decision.SerialNumber,
+                        decision.VehicleId,
+                        decision.OrderId,
+                        decision.RouteNodeIds,
+                        decision.RouteMoveIds,
+                        stoppingToken))
+                    continue;
+
                 var order = new VehicleOrder
                 {
                     OrderId = decision.OrderId,

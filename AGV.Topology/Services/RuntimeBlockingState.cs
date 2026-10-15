@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -160,6 +160,16 @@ namespace AGV.Topology.Services
         /// </summary>
         public IReadOnlySet<int> GetBlockedMoveIds()
             => _blockedMoves.Keys.ToHashSet();
+
+        /// <summary>
+        /// Returns all moves currently locked by a specific vehicle.
+        /// Used by the dashboard vehicle popup.
+        /// </summary>
+        public IReadOnlySet<int> GetVehicleLockedMoveIds(int vehicleId)
+            => _blockedMoves
+                .Where(kvp => kvp.Value.LockedByVehicleId == vehicleId)
+                .Select(kvp => kvp.Key)
+                .ToHashSet();
 
         /// <summary>
         /// Releases all move locks held by a specific vehicle.

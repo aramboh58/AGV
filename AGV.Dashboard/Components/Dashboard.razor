@@ -128,6 +128,20 @@
                     <span class="popup-label">MISSION</span>
                     <span class="popup-value">@(_selectedVehicle.CurrentMissionId?.ToString() ?? "—")</span>
                 </div>
+                @if (_selectedVehicle.CurrentPart is not null)
+                {
+                    <div class="popup-row">
+                        <span class="popup-label">CURRENT</span>
+                        <span class="popup-value popup-part">@PartText(_selectedVehicle.CurrentPart)</span>
+                    </div>
+                }
+                @if (_selectedVehicle.NextPart is not null)
+                {
+                    <div class="popup-row">
+                        <span class="popup-label">NEXT</span>
+                        <span class="popup-value popup-part">@PartText(_selectedVehicle.NextPart)</span>
+                    </div>
+                }
                 <div class="popup-section-label">SOC HISTORY</div>
                 <div class="popup-chart">
                     @{
@@ -159,12 +173,67 @@
                         </span>
                     }
                 </div>
+
+                <div class="popup-section-label">LOCKED NODES</div>
+                <div class="popup-route">
+                    @if (_selectedVehicle.LockedNodes.Count == 0)
+                    {
+                        <span class="popup-empty">—</span>
+                    }
+                    @foreach (var n in _selectedVehicle.LockedNodes)
+                    {
+                        <span class="route-node" title="@n.NodeId">@NodeText(n)</span>
+                    }
+                </div>
+
+                <div class="popup-section-label">LOCKED MOVES</div>
+                <div class="popup-route">
+                    @if (_selectedVehicle.LockedMoves.Count == 0)
+                    {
+                        <span class="popup-empty">—</span>
+                    }
+                    @foreach (var m in _selectedVehicle.LockedMoves)
+                    {
+                        <span class="route-node" title="Move @m.MoveId">@NodeShort(m.From) → @NodeShort(m.To)</span>
+                    }
+                </div>
+
+                <div class="popup-section-label">WAITING ON</div>
+                <div class="popup-route">
+                    @if (_selectedVehicle.WaitedNodes.Count == 0)
+                    {
+                        <span class="popup-empty">—</span>
+                    }
+                    @foreach (var n in _selectedVehicle.WaitedNodes)
+                    {
+                        <span class="route-node route-node-wait" title="@n.NodeId">@WaitText(n)</span>
+                    }
+                </div>
             </div>
         }
     </div>
 </div>
 
 @code {
+    // ----------------------------------------------------------------
+    // Popup display helpers (#5)
+    // ----------------------------------------------------------------
+    private static string NodeShort(NodeRefDto n)
+        => string.IsNullOrWhiteSpace(n.Name) ? n.NodeId.ToString() : n.Name!;
+
+    private static string NodeText(NodeRefDto n)
+        => string.IsNullOrWhiteSpace(n.Name)
+            ? n.NodeId.ToString()
+            : $"{n.Name} ({n.NodeId})";
+
+    private static string WaitText(NodeRefDto n)
+        => n.HeldByVehicleId is int holder
+            ? $"{NodeText(n)} · held by F{holder:D2}"
+            : NodeText(n);
+
+    private static string PartText(MissionPartDto p)
+        => $"{p.Operation} · {NodeText(p.Location)}";
+
     // ----------------------------------------------------------------
     // State
     //

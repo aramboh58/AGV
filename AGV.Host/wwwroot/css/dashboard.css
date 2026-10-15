@@ -505,6 +505,8 @@ html, body {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    max-height: calc(100% - 56px);
+    overflow-y: auto;
 }
 
 .popup-close {
@@ -609,6 +611,22 @@ html, body {
     border-color: var(--accent-cyan);
     color: var(--accent-cyan);
     background: #0a1929;
+}
+
+.route-node-wait {
+    border-color: #f59e0b;
+    color: #f59e0b;
+    background: #1f1608;
+}
+
+.popup-part {
+    text-align: right;
+    margin-left: 8px;
+}
+
+.popup-empty {
+    font-size: 9px;
+    color: var(--text-dim);
 }
 .map-controls {
     position: absolute;

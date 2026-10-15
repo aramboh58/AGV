@@ -169,6 +169,8 @@ try
     // ----------------------------------------------------------------
     builder.Services.AddSingleton<ChannelRegistry>();
     builder.Services.AddSingleton<VehicleRegistry>();
+    builder.Services.AddSingleton<ActiveMissionRegistry>();
+    builder.Services.AddSingleton<AGV.Topology.Services.LocationCatalog>();
     builder.Services.AddSingleton<CheckTableCache>();
     builder.Services.AddSingleton<RuntimeBlockingState>();
     builder.Services.AddSingleton<TopologyVersionManager>();
@@ -209,7 +211,7 @@ try
     // ----------------------------------------------------------------
     // Vehicle
     // ----------------------------------------------------------------
-    // RoadMapGraphHolder — wired to topology version change event
+    // RoadMapGraphHolder ï¿½ wired to topology version change event
     builder.Services.AddSingleton<RoadMapGraphHolder>(sp =>
     {
         var holder = new RoadMapGraphHolder();
@@ -246,6 +248,13 @@ try
         sp.GetRequiredService<TrafficManagerService>());
     builder.Services.AddHostedService(sp =>
         sp.GetRequiredService<TrafficManagerService>());
+
+    // Sliding lock window (drip feed). Traffic:LockWindowNodes in
+    // appsettings.json, default 4; 0 disables windowing.
+    builder.Services.AddSingleton(
+        builder.Configuration.GetSection(TrafficOptions.SectionName)
+            .Get<TrafficOptions>() ?? new TrafficOptions());
+    builder.Services.AddSingleton<RouteWindowManager>();
 
     builder.Services.AddSingleton<FleetManagerService>();
     builder.Services.AddSingleton<IFleetManager>(sp =>
@@ -298,7 +307,7 @@ try
         AGV.Dashboard.Services.DashboardCircuitHandler>();
 
     // ----------------------------------------------------------------
-    // Vehicle interface — Simulation or Mqtt
+    // Vehicle interface ï¿½ Simulation or Mqtt
     // ----------------------------------------------------------------
     var vehicleInterface = builder.Configuration
         .GetValue<string>("VehicleInterface") ?? "Simulation";
@@ -458,7 +467,7 @@ try
             opportunityNodeIds.Count, mandatoryNodeIds.Count);
     }
 
-    // Wire press demand — load press stand node IDs and subscribe RollDemanded
+    // Wire press demand ï¿½ load press stand node IDs and subscribe RollDemanded
     using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider
@@ -477,6 +486,15 @@ try
 
         //await AGV.Tools.ExportRoadmapJson.ExportAsync(db,
         //    @"C:\Dev\AGV\AGV.Host\wwwroot\nyt_agv_roadmap.json");
+
+        var locationCatalog = app.Services
+            .GetRequiredService<AGV.Topology.Services.LocationCatalog>();
+        locationCatalog.Load(
+            await db.Set<AGV.Core.Entities.Location>().AsNoTracking().ToListAsync(),
+            await db.Set<AGV.Core.Entities.LocationAssignment>().AsNoTracking().ToListAsync());
+        Console.WriteLine(
+            $"Location catalog: {locationCatalog.LocationCount} locations, " +
+            $"{locationCatalog.AssignmentCount} assignments.");
 
         // Load press stand drop node IDs (LPS*A and UPS*A nodes)
         var pressStandNodeIds = await db.Set<AGV.Core.Entities.Node>()

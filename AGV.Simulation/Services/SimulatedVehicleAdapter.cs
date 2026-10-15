@@ -1,4 +1,4 @@
-﻿using AGV.Core.Entities;
+using AGV.Core.Entities;
 using AGV.Core.Enums;
 using AGV.Core.Interfaces;
 using AGV.Core.Logging;
@@ -82,6 +82,33 @@ namespace AGV.Simulation.Services
         {
             var state = GetSimStateBySerial(serialNumber);
             if (state is null) return Task.CompletedTask;
+
+            // VDA 5050 order update: same orderId with a higher
+            // orderUpdateId extends the released base of the order the
+            // vehicle is already executing. Swap the order in place and
+            // keep position, travel progress and state untouched.
+            if (state.PendingOrder is not null
+                && state.CurrentOrderId == order.OrderId)
+            {
+                if (order.OrderUpdateId > state.PendingOrder.OrderUpdateId)
+                {
+                    _logger.LogDebug(
+                        "SendOrderAsync UPDATE: {Serial} order {OrderId} " +
+                        "extended to {ReleasedCount} released of {NodeCount} nodes",
+                        serialNumber, order.OrderId,
+                        order.Nodes.Count(n => n.Released),
+                        order.Nodes.Count);
+                    state.PendingOrder = order;
+                }
+                else
+                {
+                    _logger.LogDebug(
+                        "SendOrderAsync: {Serial} ignored stale/duplicate " +
+                        "update for order {OrderId}",
+                        serialNumber, order.OrderId);
+                }
+                return Task.CompletedTask;
+            }
 
             if (state.PendingOrder is not null
                 && state.CurrentOrderId != order.OrderId
@@ -379,6 +406,16 @@ namespace AGV.Simulation.Services
                         // a real MQTT-connected vehicle's position would take.
                         state.CurrentNodeId = nodeId;
                     }
+                }
+
+                // End of the released base is NOT arrival when the order
+                // still has unreleased (horizon) nodes: the host releases
+                // its route in a sliding window as it locks ahead. Hold
+                // here until an order update releases more nodes.
+                if (order.Nodes.Any(n => !n.Released))
+                {
+                    state.TravelProgress = 0;
+                    return;
                 }
 
                 // Transition based on current activity

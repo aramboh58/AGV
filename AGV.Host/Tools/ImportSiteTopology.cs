@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using AGV.Core.Entities;
 using AGV.Core.Enums;
 using AGV.Core.ValueObjects;
@@ -24,7 +24,9 @@ namespace AGV.Tools
             Console.WriteLine("Starting NYT full topology import...");
 
             // ── Clear existing topology ──────────────────────────────
-            Console.WriteLine("Clearing existing nodes and moves...");
+            Console.WriteLine("Clearing existing locations, nodes and moves...");
+            await db.Set<LocationAssignment>().ExecuteDeleteAsync();
+            await db.Set<Location>().ExecuteDeleteAsync();
             await db.Set<Move>().ExecuteDeleteAsync();
             await db.Set<Node>().ExecuteDeleteAsync();
 
@@ -80,6 +82,62 @@ namespace AGV.Tools
             await db.Set<Node>().AddRangeAsync(nodes);
             await db.SaveChangesAsync();
             Console.WriteLine($"Imported {nodes.Count} nodes.");
+
+            // ── Import locations ─────────────────────────────────────
+            Console.WriteLine("Importing locations...");
+
+            const int LocationVersionId = 1;
+            const int PlaceholderLocationTypeId = 1; // load type not available yet
+
+            var locationIds = new Dictionary<string, int>(StringComparer.Ordinal);
+            var seenAssignments = new HashSet<(int LocationId, int Op, int NodeId)>();
+            var locations = new List<Location>();
+            var assignments = new List<LocationAssignment>();
+            int skippedOps = 0;
+
+            foreach (var line in nodeLines.Skip(1))
+            {
+                var cols = line.Split('\t');
+                if (cols.Length < 11) continue;
+
+                var locName = cols[0].Trim();
+                var opName = cols[1].Trim();
+                if (locName.Length == 0 || locName == "NULL") continue;
+                if (opName.Length == 0 || opName == "NULL") continue;
+
+                if (!int.TryParse(cols[2].Trim(), out var nodeNumber)) continue;
+                if (!seenNodeIds.Contains(nodeNumber)) continue;
+
+                var op = MapOperation(opName);
+                if (op == null) { skippedOps++; continue; }
+
+                if (!locationIds.TryGetValue(locName, out var locationId))
+                {
+                    locationId = locationIds.Count + 1;
+                    locationIds[locName] = locationId;
+                    locations.Add(new Location(
+                        locationId, LocationVersionId, locName));
+                }
+
+                if (!seenAssignments.Add((locationId, (int)op.Value, nodeNumber)))
+                    continue; // duplicate after Decision collapse
+
+                assignments.Add(new LocationAssignment(
+                    assignmentId: assignments.Count + 1,
+                    effectiveFromLocationVersionId: LocationVersionId,
+                    locationId: locationId,
+                    nodeId: nodeNumber,
+                    operationTypeId: (int)op.Value,
+                    locationTypeId: PlaceholderLocationTypeId));
+            }
+
+            await db.Set<Location>().AddRangeAsync(locations);
+            await db.Set<LocationAssignment>().AddRangeAsync(assignments);
+            await db.SaveChangesAsync();
+            Console.WriteLine(
+                $"Imported {locations.Count} locations, " +
+                $"{assignments.Count} assignments. " +
+                $"Skipped {skippedOps} unknown operations.");
 
             // ── Import moves ─────────────────────────────────────────
             Console.WriteLine("Importing moves...");
@@ -194,7 +252,25 @@ namespace AGV.Tools
             Console.WriteLine("NYT full topology import complete.");
             Console.WriteLine(
                 $"Summary: {nodes.Count} nodes, {moves.Count} moves, " +
+                $"{locations.Count} locations, {assignments.Count} assignments, " +
                 $"version {VersionId}.");
         }
+
+        private static OperationType? MapOperation(string name) => name switch
+        {
+            "Pick" => OperationType.Pick,
+            "Drop" => OperationType.Drop,
+            "Charge" => OperationType.Charge,
+            "Park" => OperationType.Park,
+            "PickDecision" or "DropDecision" or "LoopDecision"
+                => OperationType.Decision,
+            "ParkCharge" => OperationType.ParkCharge,
+            "Center" => OperationType.Center,
+            "Load" => OperationType.Load,
+            "Unload" => OperationType.Unload,
+            "Equalize" => OperationType.Equalize,
+            "Maint" => OperationType.Maint,
+            _ => null
+        };
     }
 }

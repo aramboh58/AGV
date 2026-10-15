@@ -4,6 +4,7 @@ using AGV.Core.Messages;
 using AGV.Dashboard.Hubs;
 using AGV.Fleet.Infrastructure;
 using AGV.Fleet.Services;
+using AGV.Topology.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -68,6 +69,9 @@ namespace AGV.Dashboard.Services
         private readonly ILogger _logger;
         private readonly VehicleRegistry _registry;
         private readonly TrafficManagerService _traffic;
+        private readonly ActiveMissionRegistry _activeMissions;
+        private readonly RoadMapGraphHolder _graphHolder;
+        private readonly LocationCatalog _locations;
 
         // Was Dictionary<int, Queue<(DateTime,decimal)>> with NO lock —
         // genuinely unsynchronized concurrent access. See class-level
@@ -106,12 +110,18 @@ namespace AGV.Dashboard.Services
             ChannelRegistry channels,
             VehicleRegistry registry,
             TrafficManagerService traffic,
+            ActiveMissionRegistry activeMissions,
+            RoadMapGraphHolder graphHolder,
+            LocationCatalog locations,
             ILoggerFactory loggerFactory)
         {
             _hub = hub;
             _channels = channels;
             _registry = registry;
             _traffic = traffic;
+            _activeMissions = activeMissions;
+            _graphHolder = graphHolder;
+            _locations = locations;
             _logger = loggerFactory.CreateLogger(LogDomains.Dashboard);
         }
 
@@ -396,6 +406,31 @@ namespace AGV.Dashboard.Services
                 "GetVehicleDetail: V{Id} SOC history points={Count}",
                 vehicleId, socPoints.Count);
 
+            var graph = _graphHolder.Graph;
+            var (currentPart, nextPart) = GetMissionParts(vehicle, graph);
+
+            var lockedNodes = _traffic.GetVehicleLockedNodeIds(vehicleId)
+                .OrderBy(id => id)
+                .Select(id => NodeRef(graph, id))
+                .ToList();
+
+            var lockedMoves = _traffic.GetVehicleLockedMoveIds(vehicleId)
+                .OrderBy(id => id)
+                .Select(id => graph?.GetMoveById(id))
+                .Where(m => m is not null)
+                .Select(m => new MoveRefDto(
+                    m!.MoveId,
+                    NodeRef(graph, m.FromNodeId),
+                    NodeRef(graph, m.ToNodeId)))
+                .ToList();
+
+            var waitedNodes = _traffic.GetVehicleWaitedNodeIds(vehicleId)
+                .Select(id => NodeRef(graph, id) with
+                {
+                    HeldByVehicleId = _traffic.GetNodeHolderVehicleId(id)
+                })
+                .ToList();
+
             return new VehicleDetailDto(
                 vehicle.VehicleId,
                 vehicle.SerialNumber,
@@ -405,7 +440,48 @@ namespace AGV.Dashboard.Services
                 vehicle.CurrentMissionId,
                 vehicle.PlannedRouteNodeIds.ToList(),
                 vehicle.CurrentNodeId,
-                socPoints);
+                socPoints,
+                currentPart,
+                nextPart,
+                lockedNodes,
+                lockedMoves,
+                waitedNodes);
+        }
+
+        // ----------------------------------------------------------------
+        // Popup detail helpers (#5)
+        // ----------------------------------------------------------------
+
+        /// <summary>
+        /// Builds a node reference for the popup. The display name is the
+        /// node's location name when it has one (preferring the location
+        /// whose operation matches), otherwise the node name.
+        /// </summary>
+        private NodeRefDto NodeRef(
+            RoadMapGraph? graph, int nodeId, OperationType? operation = null)
+            => new(nodeId,
+                _locations.GetLabel(nodeId, operation)
+                    ?? graph?.GetNode(nodeId)?.NodeName);
+
+        /// <summary>
+        /// Derives the current and next mission part from the vehicle's
+        /// active MissionContext. A mission currently has two parts,
+        /// Pick (at PickupNodeId) then Drop (at DropNodeId); an unloaded
+        /// vehicle is on Pick, a loaded one is on Drop. Kept in one place
+        /// so it can later become an n-part list.
+        /// </summary>
+        private (MissionPartDto? Current, MissionPartDto? Next) GetMissionParts(
+            AGV.Core.Entities.Vehicle vehicle, RoadMapGraph? graph)
+        {
+            var mission = _activeMissions.GetByVehicle(vehicle.VehicleId);
+            if (mission is null) return (null, null);
+
+            var pick = new MissionPartDto(
+                "Pick", NodeRef(graph, mission.PickupNodeId, OperationType.Pick));
+            var drop = new MissionPartDto(
+                "Drop", NodeRef(graph, mission.DropNodeId, OperationType.Drop));
+
+            return vehicle.IsLoaded ? (drop, null) : (pick, drop);
         }
 
         private async Task BroadcastMissionUpdatesAsync(CancellationToken ct)
