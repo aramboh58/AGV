@@ -132,7 +132,11 @@ namespace AGV.Simulation.Services
 
             state.NodeIndex = 0;
             state.TravelProgress = 0;
-            state.StateMachine.TryTransition(ActivityState.TravelingToPickup);
+
+            // A loaded vehicle receiving a new order is starting its
+            // drop leg: it stays in the loaded travel state.
+            if (!state.StateMachine.IsLoaded)
+                state.StateMachine.TryTransition(ActivityState.TravelingToPickup);
             state.StateMachine.SetOrderState(OrderState.Waiting);
 
             _logger.LogDebug(
@@ -544,7 +548,12 @@ namespace AGV.Simulation.Services
                 {
                     state.StateMachine.TryTransition(
                         ActivityState.TravelingLoaded);
+
+                    // The pickup order is complete. Hold here until the
+                    // host sends the drop leg as a new order.
+                    state.PendingOrder = null;
                     state.NodeIndex = 0;
+                    state.TravelProgress = 0;
                 }
                 else // Dropping
                 {

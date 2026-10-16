@@ -35,6 +35,7 @@ namespace AGV.Topology.Services
 
             public Dictionary<int, List<LocationEntry>> ByNode { get; init; } = new();
             public Dictionary<(string Name, OperationType Op), List<LocationEntry>> ByNameOp { get; init; } = new();
+            public Dictionary<OperationType, List<LocationEntry>> ByOperation { get; init; } = new();
             public int LocationCount { get; init; }
             public int AssignmentCount { get; init; }
         }
@@ -66,6 +67,7 @@ namespace AGV.Topology.Services
 
             var byNode = new Dictionary<int, List<LocationEntry>>();
             var byNameOp = new Dictionary<(string, OperationType), List<LocationEntry>>();
+            var byOperation = new Dictionary<OperationType, List<LocationEntry>>();
 
             foreach (var a in currentAssignments)
             {
@@ -82,12 +84,17 @@ namespace AGV.Topology.Services
                 if (!byNameOp.TryGetValue(key, out var opList))
                     byNameOp[key] = opList = new List<LocationEntry>();
                 opList.Add(entry);
+
+                if (!byOperation.TryGetValue(entry.Operation, out var allOp))
+                    byOperation[entry.Operation] = allOp = new List<LocationEntry>();
+                allOp.Add(entry);
             }
 
             _snapshot = new Snapshot
             {
                 ByNode = byNode,
                 ByNameOp = byNameOp,
+                ByOperation = byOperation,
                 LocationCount = currentLocations.Count,
                 AssignmentCount = currentAssignments.Count
             };
@@ -121,6 +128,15 @@ namespace AGV.Topology.Services
             var others = entries.Select(e => e.LocationName).Distinct().Count() - 1;
             return others > 0 ? $"{chosen.LocationName} +{others}" : chosen.LocationName;
         }
+
+        /// <summary>
+        /// Every location entry that performs the operation, ordered by
+        /// name. Used to generate missions from locations.
+        /// </summary>
+        public IReadOnlyList<LocationEntry> GetEntries(OperationType operation)
+            => _snapshot.ByOperation.TryGetValue(operation, out var list)
+                ? list.OrderBy(e => e.LocationName, StringComparer.Ordinal).ToList()
+                : Array.Empty<LocationEntry>();
 
         /// <summary>
         /// Every node bound to the location name and operation.

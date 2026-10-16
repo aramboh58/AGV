@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -78,6 +78,15 @@ namespace AGV.Core.Messages
         /// ultimately executes the delivery.
         /// </summary>
         public int DropNodeId { get; init; }
+
+        /// <summary>
+        /// The ordered parts of this mission: each a location name plus
+        /// an operation, resolved to a node. Empty for missions created
+        /// from raw node ids. PickupNodeId and DropNodeId remain the
+        /// source of truth for dispatch until parts drive it fully.
+        /// </summary>
+        public IReadOnlyList<MissionPart> Parts { get; init; }
+            = Array.Empty<MissionPart>();
 
         /// <summary>
         /// Optional load identity — SKU, pallet ID, roll ID, etc.
@@ -171,6 +180,15 @@ namespace AGV.Core.Messages
         public MissionContext WithEscalatedPriority(MissionPriority newPriority)
             => this with { Priority = newPriority };
     }
+
+    /// <summary>
+    /// One part of a mission: an operation at a named location,
+    /// resolved to the node where it is performed.
+    /// </summary>
+    public sealed record MissionPart(
+        string LocationName,
+        OperationType Operation,
+        int NodeId);
 
     /// <summary>
     /// A single record in a mission's transfer audit trail.

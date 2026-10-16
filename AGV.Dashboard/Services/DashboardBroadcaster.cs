@@ -476,6 +476,26 @@ namespace AGV.Dashboard.Services
             var mission = _activeMissions.GetByVehicle(vehicle.VehicleId);
             if (mission is null) return (null, null);
 
+            // Missions built from locations carry their parts: show the
+            // exact location name. An unloaded vehicle is on the first
+            // part, a loaded one on the second.
+            if (mission.Parts.Count > 0)
+            {
+                var index = vehicle.IsLoaded
+                    ? Math.Min(1, mission.Parts.Count - 1)
+                    : 0;
+
+                MissionPartDto ToDto(MissionPart p) => new(
+                    p.Operation.ToString(),
+                    new NodeRefDto(p.NodeId, p.LocationName));
+
+                return (
+                    ToDto(mission.Parts[index]),
+                    index + 1 < mission.Parts.Count
+                        ? ToDto(mission.Parts[index + 1])
+                        : null);
+            }
+
             var pick = new MissionPartDto(
                 "Pick", NodeRef(graph, mission.PickupNodeId, OperationType.Pick));
             var drop = new MissionPartDto(

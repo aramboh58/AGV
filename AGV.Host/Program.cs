@@ -496,24 +496,28 @@ try
             $"Location catalog: {locationCatalog.LocationCount} locations, " +
             $"{locationCatalog.AssignmentCount} assignments.");
 
-        // Load press stand drop node IDs (LPS*A and UPS*A nodes)
-        var pressStandNodeIds = await db.Set<AGV.Core.Entities.Node>()
-            .Where(n => n.NodeId >= 5000 && n.NodeId <= 6999)
-            .Select(n => n.NodeId)
-            .ToListAsync();
-        simOptions.PressStandNodeIds = pressStandNodeIds;
+        // Mission generation from locations (location name + operation).
+        // Press stands are the P4x_NN drop locations; pickups are the
+        // LANE_n pick locations. Patterns can move to configuration later.
+        var pressStandPattern =
+            new System.Text.RegularExpressions.Regex(@"^P4\d_\d{2}$");
+        var pickupPattern =
+            new System.Text.RegularExpressions.Regex(@"^LANE_\d+$");
 
-        // Load staging pickup assignment IDs keyed by node name
-        var stagingAssignmentIds = await db.Set<AGV.Core.Entities.Node>()
-            .Where(n => n.NodeId >= 7300 && n.NodeId <= 7630
-                     && n.NodeType == NodeType.DestinationOnly)
-            .Select(n => n.NodeId)
-            .ToListAsync();
+        var pressStandDrops = locationCatalog
+            .GetEntries(AGV.Core.Enums.OperationType.Drop)
+            .Where(e => pressStandPattern.IsMatch(e.LocationName))
+            .ToList();
+        var pickupLocations = locationCatalog
+            .GetEntries(AGV.Core.Enums.OperationType.Pick)
+            .Where(e => pickupPattern.IsMatch(e.LocationName))
+            .ToList();
 
-        // Build press stand drop assignment lookup: NodeId -> AssignmentId
-        var dropAssignments = await db.Set<AGV.Core.Entities.Node>()
-            .Where(n => n.NodeId >= 5000 && n.NodeId <= 6999)
-            .ToDictionaryAsync(n => n.NodeId, n => n.NodeId);
+        simOptions.PressStandNodeIds = pressStandDrops
+            .Select(e => e.NodeId).Distinct().ToList();
+        var dropByNode = pressStandDrops
+            .GroupBy(e => e.NodeId)
+            .ToDictionary(g => g.Key, g => g.First());
         int missionCounter = 0;
 
         // Subscribe to RollDemanded
@@ -521,24 +525,38 @@ try
         {
             try
             {
-                if (!dropAssignments.TryGetValue(
-                    args.PressStandNodeId, out var dropNodeId))
+                if (pickupLocations.Count == 0
+                    || !dropByNode.TryGetValue(
+                        args.PressStandNodeId, out var drop))
                 {
                     Log.Warning(
-                        "RollDemanded: no assignment found for node {NodeId}",
+                        "RollDemanded: no location for node {NodeId}",
                         args.PressStandNodeId);
                     return;
                 }
-                var pickupNodeId = stagingAssignmentIds[
-                    Math.Abs(Interlocked.Increment(ref missionCounter))
-                    % stagingAssignmentIds.Count];
+
+                var pick = pickupLocations[(int)(
+                    (uint)Interlocked.Increment(ref missionCounter)
+                    % (uint)pickupLocations.Count)];
+
                 var context = new AGV.Core.Messages.MissionContext
                 {
                     MissionId = 0,
                     CurrentOrderId = $"ORD{Guid.NewGuid():N}"[..12]
                         .ToUpperInvariant(),
-                    PickupNodeId = pickupNodeId,
-                    DropNodeId = dropNodeId,
+                    PickupNodeId = pick.NodeId,
+                    DropNodeId = drop.NodeId,
+                    Parts = new[]
+                    {
+                        new AGV.Core.Messages.MissionPart(
+                            pick.LocationName,
+                            AGV.Core.Enums.OperationType.Pick,
+                            pick.NodeId),
+                        new AGV.Core.Messages.MissionPart(
+                            drop.LocationName,
+                            AGV.Core.Enums.OperationType.Drop,
+                            drop.NodeId),
+                    },
                     Priority = AGV.Core.Enums.MissionPriority.Normal,
                     CreatedAt = DateTime.UtcNow,
                 };
@@ -551,8 +569,8 @@ try
         };
 
         Log.Information(
-            "Press demand wired: {Count} press stands, {Staging} staging positions",
-            pressStandNodeIds.Count, stagingAssignmentIds.Count);
+            "Press demand wired: {Count} press stands, {Pickups} pickup lanes",
+            pressStandDrops.Count, pickupLocations.Count);
     }
 
     await app.RunAsync();

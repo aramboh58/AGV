@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -62,6 +63,11 @@ namespace AGV.Fleet.Services
 
         private int _enqueuedMissions;
         private int _dispatchedMissions;
+
+        // Vehicle -> mission whose drop leg has already been sent, and the
+        // earliest time to retry routing a drop leg that found no route.
+        private readonly ConcurrentDictionary<int, int> _dropLegSent = new();
+        private readonly ConcurrentDictionary<int, DateTime> _dropLegRetryAt = new();
         public FleetManagerService(
             VehicleRegistry registry,
             ActiveMissionRegistry activeMissions,
@@ -450,6 +456,9 @@ namespace AGV.Fleet.Services
                     vehicle.VehicleId, update.LastNodeId, stoppingToken);
             }
 
+            // Picked up: send the drop leg as a new order
+            await TryDispatchDropLegAsync(vehicle, update, stoppingToken);
+
             // Check for connection/error states
             if (update.Errors.Count > 0)
             {
@@ -471,6 +480,8 @@ namespace AGV.Fleet.Services
             {
                 vehicle.ClearMission();
                 _activeMissions.Remove(vehicle.VehicleId);
+                _dropLegSent.TryRemove(vehicle.VehicleId, out _);
+                _dropLegRetryAt.TryRemove(vehicle.VehicleId, out _);
                 await _channels.MissionUpdates.Writer.WriteAsync(
                     new VehicleMissionUpdate(
                         vehicle.VehicleId,
@@ -491,6 +502,99 @@ namespace AGV.Fleet.Services
         }
 
         // ----------------------------------------------------------------
+        // Drop leg
+        // ----------------------------------------------------------------
+
+        /// <summary>
+        /// Once the vehicle has picked up (loaded, traveling loaded) and
+        /// has not yet been given a route to the drop, routes from its
+        /// current node to the mission's drop node and sends that as a new
+        /// order. Retries every two seconds when no route is available.
+        /// </summary>
+        private async Task TryDispatchDropLegAsync(
+            Vehicle vehicle,
+            VehicleStateUpdate update,
+            CancellationToken stoppingToken)
+        {
+            if (!vehicle.CurrentMissionId.HasValue) return;
+            if (!update.IsLoaded
+                || update.ActivityState != ActivityState.TravelingLoaded)
+                return;
+
+            var mission = _activeMissions.GetByVehicle(vehicle.VehicleId);
+            if (mission is null || mission.DropNodeId <= 0) return;
+
+            if (_dropLegSent.TryGetValue(vehicle.VehicleId, out var sentFor)
+                && sentFor == mission.MissionId)
+                return;
+
+            if (_dropLegRetryAt.TryGetValue(vehicle.VehicleId, out var retryAt)
+                && DateTime.UtcNow < retryAt)
+                return;
+
+            var route = await _routing.FindRouteAsync(
+                vehicle.CurrentNodeId ?? 0,
+                mission.DropNodeId,
+                vehicle.VehicleId,
+                _traffic.GetLockedNodeIds(),
+                _traffic.GetLockedMoveIds(),
+                stoppingToken);
+
+            if (route is null)
+            {
+                _dropLegRetryAt[vehicle.VehicleId] =
+                    DateTime.UtcNow.AddSeconds(2);
+                _dispatchLogger.LogWarning(
+                    "No route for vehicle {VehicleId} from node {From} " +
+                    "to drop {DropNodeId} (mission {MissionId}) — retrying",
+                    vehicle.VehicleId, vehicle.CurrentNodeId,
+                    mission.DropNodeId, mission.MissionId);
+                return;
+            }
+
+            var orderId = Guid.NewGuid().ToString("N")[..8].ToUpper();
+            _activeMissions.Set(
+                vehicle.VehicleId, mission with { CurrentOrderId = orderId });
+            _dropLegSent[vehicle.VehicleId] = mission.MissionId;
+            _dropLegRetryAt.TryRemove(vehicle.VehicleId, out _);
+
+            var routeNodeIds = route.Nodes
+                .Select(n => n.NodeId).ToList().AsReadOnly();
+
+            vehicle.AssignMission(mission.MissionId, routeNodeIds);
+            vehicle.UpdateState(
+                ActivityState.TravelingLoaded, OrderState.Waiting);
+
+            await _channels.DispatchDecisions.Writer.WriteAsync(
+                new MissionDispatchDecision
+                {
+                    MissionId = mission.MissionId,
+                    OrderId = orderId,
+                    VehicleId = vehicle.VehicleId,
+                    SerialNumber = vehicle.SerialNumber,
+                    RouteNodeIds = routeNodeIds,
+                    RouteMoveIds = route.MoveIds,
+                    PickupAssignmentId = mission.PickupNodeId,
+                    DropoffAssignmentId = mission.DropNodeId,
+                    EstimatedTravelTimeSeconds =
+                        route.EstimatedTravelTimeSeconds,
+                }, stoppingToken);
+
+            await _channels.MissionUpdates.Writer.WriteAsync(
+                new VehicleMissionUpdate(
+                    vehicle.VehicleId, mission.MissionId, routeNodeIds),
+                stoppingToken);
+
+            _dispatchLogger.LogInformation(
+                "Drop leg sent: vehicle {VehicleId} mission {MissionId} " +
+                "node {From} → drop {DropNodeId} " +
+                "(ETA {ETA:F0}s, route {Hops} hops)",
+                vehicle.VehicleId, mission.MissionId,
+                vehicle.CurrentNodeId, mission.DropNodeId,
+                route.EstimatedTravelTimeSeconds, route.Nodes.Count);
+        }
+
+        // ----------------------------------------------------------------
         // Mission transfer processing
         // ----------------------------------------------------------------
 
@@ -506,6 +610,8 @@ namespace AGV.Fleet.Services
             var fromVehicle = _registry.GetById(transfer.FromVehicleId);
             fromVehicle?.ClearMission();
             _activeMissions.Remove(transfer.FromVehicleId);
+            _dropLegSent.TryRemove(transfer.FromVehicleId, out _);
+            _dropLegRetryAt.TryRemove(transfer.FromVehicleId, out _);
 
             var context = transfer.MissionContext;
 
