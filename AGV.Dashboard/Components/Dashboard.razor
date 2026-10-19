@@ -7,6 +7,7 @@
 @inject NavigationManager Nav
 @inject VehicleRegistry VehicleRegistry
 @inject DashboardBroadcaster Broadcaster
+@inject MissionBoardService MissionBoard
 @inject IJSRuntime JS
 @inject ILogger<Dashboard> Logger
 @inject CircuitCleanupRegistry CircuitCleanup
@@ -56,7 +57,10 @@
 
             <!-- Mission Counters -->
             <section class="counter-panel">
-                <div class="panel-label">MISSIONS</div>
+                <div class="panel-label panel-label-row">
+                    <span>MISSIONS</span>
+                    <button class="queue-btn @(_boardOpen ? "queue-btn-on" : "")">QUEUE</button>
+                </div>
                 <div class="counters">
                     <div class="counter">
                         <span class="counter-value" id="cnt-enqueued">@_enqueued</span>
@@ -211,10 +215,154 @@
                 </div>
             </div>
         }
+
+        @if (_boardOpen && _board is not null)
+        {
+            <div class="mission-board">
+                <button class="board-close">✕</button>
+                <div class="popup-title">MISSION QUEUE</div>
+
+                <div class="popup-section-label">ACTIVE — @_board.Active.Count</div>
+                @if (_board.Active.Count == 0)
+                {
+                    <span class="popup-empty">—</span>
+                }
+                @foreach (var row in _board.Active)
+                {
+                    <div class="board-row">
+                        <div class="board-row-head">
+                            <span class="board-id">M@(row.MissionId)</span>
+                            <span class="board-veh">F@(row.VehicleId?.ToString("D2"))</span>
+                            <span class="board-state">@row.VehicleState</span>
+                            <span class="board-pri">@row.Priority</span>
+                            <span class="board-age">@FormatAge(row.AgeSeconds)</span>
+                        </div>
+                        <div class="board-parts">
+                            @for (var i = 0; i < row.Parts.Count; i++)
+                            {
+                                <span class="route-node @(i == row.CurrentIndex ? "route-node-current" : "")">@row.Parts[i].Operation · @row.Parts[i].Label</span>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <div class="popup-section-label">QUEUED — @_board.QueuedTotal@(_board.QueuedTotal > _board.Queued.Count ? $" (showing {_board.Queued.Count})" : "")</div>
+                @if (_board.Queued.Count == 0)
+                {
+                    <span class="popup-empty">—</span>
+                }
+                @foreach (var row in _board.Queued)
+                {
+                    <div class="board-row">
+                        <div class="board-row-head">
+                            <span class="board-id">M@(row.MissionId)</span>
+                            <span class="board-pri">@row.Priority</span>
+                            <span class="board-age">@FormatAge(row.AgeSeconds)</span>
+                            <button class="board-cancel" title="Cancel mission" data-mid="@row.MissionId">✕</button>
+                        </div>
+                        <div class="board-parts">
+                            @foreach (var p in row.Parts)
+                            {
+                                <span class="route-node">@p.Operation · @p.Label</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
     </div>
 </div>
 
 @code {
+    // ----------------------------------------------------------------
+    // Mission queue viewer (#4). Per-circuit, like the vehicle popup:
+    // polls MissionBoardService once a second only while open.
+    // ----------------------------------------------------------------
+    private bool _boardOpen;
+    private MissionBoardDto? _board;
+    private System.Threading.CancellationTokenSource? _boardCts;
+
+    private static string FormatAge(int seconds)
+        => seconds >= 3600
+            ? $"{seconds / 3600}h{seconds % 3600 / 60:D2}m"
+            : $"{seconds / 60}:{seconds % 60:D2}";
+
+    // Invoked from fleet-map.js's document click handler (same pattern as
+    // OnVehicleClicked / ClosePopup): Blazor @onclick never fired here.
+    [JSInvokable]
+    public Task ToggleBoardJs() { ToggleBoard(); StateHasChanged(); return Task.CompletedTask; }
+
+    [JSInvokable]
+    public Task CloseBoardJs() { CloseBoard(); StateHasChanged(); return Task.CompletedTask; }
+
+    [JSInvokable]
+    public Task CancelMissionJs(int missionId) { CancelMission(missionId); StateHasChanged(); return Task.CompletedTask; }
+
+    private void ToggleBoard()
+    {
+        if (_boardOpen) CloseBoard(); else OpenBoard();
+    }
+
+    private void OpenBoard()
+    {
+        _board = MissionBoard.GetSnapshot();
+        _boardOpen = true;
+        StopBoardRefresh();
+        var cts = new System.Threading.CancellationTokenSource();
+        _boardCts = cts;
+        _ = RunBoardRefreshAsync(cts.Token);
+    }
+
+    private void CloseBoard()
+    {
+        StopBoardRefresh();
+        _boardOpen = false;
+        _board = null;
+    }
+
+    private void CancelMission(int missionId)
+    {
+        MissionBoard.Cancel(missionId);
+        _board = MissionBoard.GetSnapshot();
+    }
+
+    private void StopBoardRefresh()
+    {
+        var cts = System.Threading.Interlocked.Exchange(ref _boardCts, null);
+        if (cts is null) return;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        cts.Dispose();
+    }
+
+    private async Task RunBoardRefreshAsync(System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new System.Threading.PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                try
+                {
+                    var snap = MissionBoard.GetSnapshot();
+                    SafeInvokeAsync(() =>
+                    {
+                        if (!ct.IsCancellationRequested)
+                        {
+                            _board = snap;
+                            StateHasChanged();
+                        }
+                        return Task.CompletedTask;
+                    }, nameof(RunBoardRefreshAsync));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogError(ex, "Mission board refresh tick failed");
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* board closed */ }
+    }
+
     // ----------------------------------------------------------------
     // Popup display helpers (#5)
     // ----------------------------------------------------------------
@@ -549,6 +697,7 @@
         // Per-circuit popup refresh loop (#11b) — stop it too, so a
         // closed circuit doesn't keep polling for a popup nobody sees.
         StopPopupRefresh();
+        StopBoardRefresh();
     }
 
     // ----------------------------------------------------------------

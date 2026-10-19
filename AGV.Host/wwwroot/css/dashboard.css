@@ -660,3 +660,112 @@ html, body {
         border-color: var(--accent-cyan);
         color: var(--accent-cyan);
     }
+
+/* ── Mission queue viewer (#4) ───────────────────────────────────── */
+.panel-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.queue-btn {
+    font-family: var(--font-display);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 2px 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+    .queue-btn:hover,
+    .queue-btn-on {
+        border-color: var(--accent-cyan);
+        color: var(--accent-cyan);
+    }
+
+.mission-board {
+    pointer-events: all;
+    position: absolute;
+    top: 44px;
+    right: 312px;
+    width: 380px;
+    max-height: calc(100% - 56px);
+    overflow-y: auto;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    padding: 10px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.board-close {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 16px;
+    height: 16px;
+    font-size: 9px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+    .board-close:hover,
+    .board-cancel:hover {
+        border-color: var(--accent-red);
+        color: var(--accent-red);
+    }
+
+.board-row {
+    padding: 4px 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.board-row-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+}
+
+.board-id    { color: var(--text-primary); font-weight: 500; }
+.board-veh   { color: var(--accent-cyan); }
+.board-state { color: var(--text-secondary); font-size: 9px; }
+.board-pri   { color: var(--accent-yellow); font-size: 9px; }
+.board-age   { color: var(--text-dim); margin-left: auto; }
+
+.board-cancel {
+    width: 14px;
+    height: 14px;
+    font-size: 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.board-parts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+}

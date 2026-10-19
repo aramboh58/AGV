@@ -286,6 +286,7 @@ try
     // Dashboard broadcaster
     // ----------------------------------------------------------------
     builder.Services.AddSingleton<AGV.Dashboard.Services.DashboardBroadcaster>();
+    builder.Services.AddSingleton<AGV.Dashboard.Services.MissionBoardService>();
     builder.Services.AddHostedService(sp =>
         sp.GetRequiredService<AGV.Dashboard.Services.DashboardBroadcaster>());
 

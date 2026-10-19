@@ -776,6 +776,19 @@
             return;
         }
 
+        const qb = target.closest('.queue-btn, .board-close, .board-cancel');
+        if (qb && window.fleetMap._dotNetRef) {
+            const ref = window.fleetMap._dotNetRef;
+            if (qb.classList.contains('queue-btn'))
+                ref.invokeMethodAsync('ToggleBoardJs');
+            else if (qb.classList.contains('board-close'))
+                ref.invokeMethodAsync('CloseBoardJs');
+            else
+                ref.invokeMethodAsync('CancelMissionJs',
+                    parseInt(qb.getAttribute('data-mid')));
+            return;
+        }
+
         if (target.classList.contains('popup-close')) {
             setTimeout(async function () {
                 if (window.fleetMap._dotNetRef)
