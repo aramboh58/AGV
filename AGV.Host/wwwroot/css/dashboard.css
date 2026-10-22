@@ -668,7 +668,9 @@ html, body {
     align-items: center;
 }
 
-.queue-btn {
+.queue-btn,
+.builder-btn,
+.scenario-btn {
     font-family: var(--font-display);
     font-size: 9px;
     font-weight: 700;
@@ -682,6 +684,8 @@ html, body {
 }
 
     .queue-btn:hover,
+    .builder-btn:hover,
+    .scenario-btn:hover,
     .queue-btn-on {
         border-color: var(--accent-cyan);
         color: var(--accent-cyan);
@@ -768,4 +772,200 @@ html, body {
     display: flex;
     flex-wrap: wrap;
     gap: 3px;
+}
+
+/* ── Mission builder (#3) ────────────────────────────────────────── */
+.label-btns { display: flex; gap: 4px; }
+
+.mission-builder {
+    pointer-events: all;
+    position: absolute;
+    top: 44px;
+    right: 704px;
+    width: 260px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    padding: 10px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.builder-close {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 16px;
+    height: 16px;
+    font-size: 9px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+    .builder-close:hover {
+        border-color: var(--accent-red);
+        color: var(--accent-red);
+    }
+
+.builder-select {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 3px 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: 3px;
+    color: var(--text-primary);
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.builder-submit {
+    margin-top: 4px;
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 5px 0;
+    background: #0a1929;
+    border: 1px solid var(--accent-cyan);
+    border-radius: 3px;
+    color: var(--accent-cyan);
+    cursor: pointer;
+}
+
+    .builder-submit:hover { background: #0e2a46; }
+
+.builder-msg {
+    min-height: 14px;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+/* ── Simulation choreography (SIMULATION / DEMO ONLY) ────────────── */
+.scenario-dialog {
+    pointer-events: all;
+    position: absolute;
+    top: 44px;
+    left: 12px;
+    width: 900px;
+    max-height: calc(100% - 56px);
+    overflow-y: auto;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    padding: 10px;
+    z-index: 110;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sc-tag {
+    margin-left: 10px;
+    font-family: var(--font-display);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--accent-orange);
+    border: 1px solid var(--accent-orange);
+    border-radius: 2px;
+    padding: 1px 5px;
+    vertical-align: middle;
+}
+
+.sc-toolbar { display: flex; gap: 6px; align-items: center; }
+.sc-toolbar .builder-select { width: auto; flex: 1; min-width: 0; }
+.sc-toolbar .sc-name  { flex: 2; -webkit-user-select: text; user-select: text; }
+.toolbar-off, .sc-toolbar .sc-off { flex: 0 0 70px; }
+.sc-toolbar .sc-pri   { flex: 0 0 100px; }
+
+.sc-btn {
+    font-family: var(--font-display);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 4px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+    .sc-btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+    .sc-run  { border-color: var(--accent-green); color: var(--accent-green); }
+    .sc-stop { border-color: var(--accent-red);   color: var(--accent-red); }
+
+.sc-runline {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent-cyan);
+}
+
+.sc-gridwrap {
+    max-height: 340px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+}
+
+.sc-grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-primary);
+}
+
+    .sc-grid th {
+        position: sticky;
+        top: 0;
+        background: var(--bg-card);
+        text-align: left;
+        font-family: var(--font-display);
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        color: var(--text-secondary);
+        padding: 4px 6px;
+        border-bottom: 1px solid var(--border-bright);
+    }
+
+    .sc-grid td {
+        padding: 3px 6px;
+        border-bottom: 1px solid var(--border);
+        -webkit-user-select: text;
+        user-select: text;
+    }
+
+.sc-status-pending { color: var(--text-dim); }
+.sc-status-queued  { color: var(--accent-yellow); }
+.sc-status-active  { color: var(--accent-cyan); }
+.sc-status-done    { color: var(--accent-green); }
+.sc-status-failed  { color: var(--accent-red); }
+
+.sc-note { font-size: 10px; color: var(--text-secondary); letter-spacing: 0.04em; }
+
+/* Floating panels: title bar is the drag handle; two panels are resizable */
+.vehicle-popup .popup-title,
+.mission-board .popup-title,
+.mission-builder .popup-title,
+.scenario-dialog .popup-title {
+    cursor: grab;
+}
+
+.mission-board, .scenario-dialog {
+    resize: both;
+}
+
+.scenario-dialog {
+    min-width: 520px;
 }

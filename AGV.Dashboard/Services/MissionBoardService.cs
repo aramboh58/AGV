@@ -1,4 +1,5 @@
 using AGV.Core.Enums;
+using AGV.Core.Interfaces;
 using AGV.Core.Messages;
 using AGV.Fleet.Infrastructure;
 using AGV.Fleet.Services;
@@ -19,6 +20,11 @@ namespace AGV.Dashboard.Services
         int AgeSeconds,
         bool CanCancel);
 
+    public sealed record MissionBuilderOptions(
+        IReadOnlyList<string> PickLocations,
+        IReadOnlyList<string> DropLocations,
+        IReadOnlyList<string> Priorities);
+
     public sealed record MissionBoardDto(
         IReadOnlyList<MissionRowDto> Active,
         IReadOnlyList<MissionRowDto> Queued,
@@ -38,22 +44,93 @@ namespace AGV.Dashboard.Services
         private readonly VehicleRegistry _vehicles;
         private readonly LocationCatalog _locations;
         private readonly RoadMapGraphHolder _graphHolder;
+        private readonly IFleetManager _fleet;
 
         public MissionBoardService(
             MissionQueueService queue,
             ActiveMissionRegistry active,
             VehicleRegistry vehicles,
             LocationCatalog locations,
-            RoadMapGraphHolder graphHolder)
+            RoadMapGraphHolder graphHolder,
+            IFleetManager fleet)
         {
             _queue = queue;
             _active = active;
             _vehicles = vehicles;
             _locations = locations;
             _graphHolder = graphHolder;
+            _fleet = fleet;
         }
 
         public bool Cancel(int missionId) => _queue.Cancel(missionId);
+
+        // ------------------------------------------------------------
+        // Mission builder (#3). Two parts for now (Pick then Drop),
+        // because that is all the dispatcher/simulator execute.
+        // ------------------------------------------------------------
+
+        public int? ResolveNode(string locationName, OperationType op)
+        {
+            var nodes = _locations.ResolveNodes(locationName, op);
+            return nodes.Count > 0 ? nodes[0] : null;
+        }
+
+        public MissionBuilderOptions GetBuilderOptions()
+        {
+            static List<string> Names(IEnumerable<LocationEntry> e)
+                => e.Select(x => x.LocationName).Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+            var priorities = Enum.GetNames(typeof(MissionPriority))
+                .Where(n => n != "ParkOrCharge")
+                .ToList();
+
+            return new MissionBuilderOptions(
+                Names(_locations.GetEntries(OperationType.Pick)),
+                Names(_locations.GetEntries(OperationType.Drop)),
+                priorities);
+        }
+
+        public async Task<string> CreateMissionAsync(
+            string pickName, string dropName, string priorityName)
+            => (await TryCreateMissionAsync(pickName, dropName, priorityName, null)).Message;
+
+        public async Task<(bool Ok, string Message)> TryCreateMissionAsync(
+            string pickName, string dropName, string priorityName, string? sourceRef)
+        {
+            var pickNodes = _locations.ResolveNodes(pickName, OperationType.Pick);
+            if (pickNodes.Count == 0) return (false, $"Unknown pick location '{pickName}'.");
+            var dropNodes = _locations.ResolveNodes(dropName, OperationType.Drop);
+            if (dropNodes.Count == 0) return (false, $"Unknown drop location '{dropName}'.");
+
+            if (!Enum.TryParse<MissionPriority>(priorityName, out var priority))
+                priority = MissionPriority.Normal;
+
+            var context = new MissionContext
+            {
+                MissionId = 0, // assigned by the fleet manager
+                CurrentOrderId = $"ORD{Guid.NewGuid():N}"[..12].ToUpperInvariant(),
+                PickupNodeId = pickNodes[0],
+                DropNodeId = dropNodes[0],
+                Parts = new[]
+                {
+                    new MissionPart(pickName, OperationType.Pick, pickNodes[0]),
+                    new MissionPart(dropName, OperationType.Drop, dropNodes[0]),
+                },
+                Priority = priority,
+                SourceSystemReference = sourceRef,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            try
+            {
+                await _fleet.EnqueueMissionAsync(context);
+                return (true, $"Enqueued {pickName} → {dropName} ({priority}).");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Enqueue failed: {ex.Message}");
+            }
+        }
 
         public MissionBoardDto GetSnapshot()
         {

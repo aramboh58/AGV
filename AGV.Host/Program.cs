@@ -287,6 +287,13 @@ try
     // ----------------------------------------------------------------
     builder.Services.AddSingleton<AGV.Dashboard.Services.DashboardBroadcaster>();
     builder.Services.AddSingleton<AGV.Dashboard.Services.MissionBoardService>();
+    builder.Services.AddSingleton<AGV.Dashboard.Services.ScenarioService>(sp =>
+        new AGV.Dashboard.Services.ScenarioService(
+            sp.GetRequiredService<AGV.Dashboard.Services.MissionBoardService>(),
+            sp.GetRequiredService<MissionQueueService>(),
+            sp.GetRequiredService<VehicleRegistry>(),
+            sp.GetRequiredService<ActiveMissionRegistry>(),
+            sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>()));
     builder.Services.AddHostedService(sp =>
         sp.GetRequiredService<AGV.Dashboard.Services.DashboardBroadcaster>());
 

@@ -1,0 +1,41 @@
+{
+  "Name": "Reel Prep Strip1 \u0026 Strip2",
+  "Missions": [
+    {
+      "OffsetSeconds": 0,
+      "PickLocation": "Strip1",
+      "DropLocation": "LANE_100",
+      "Priority": "Normal"
+    },
+    {
+      "OffsetSeconds": 300,
+      "PickLocation": "Strip1",
+      "DropLocation": "LANE_100",
+      "Priority": "Normal"
+    },
+    {
+      "OffsetSeconds": 600,
+      "PickLocation": "Strip1",
+      "DropLocation": "LANE_100",
+      "Priority": "Normal"
+    },
+    {
+      "OffsetSeconds": 900,
+      "PickLocation": "Strip2",
+      "DropLocation": "LANE_100",
+      "Priority": "Normal"
+    },
+    {
+      "OffsetSeconds": 1200,
+      "PickLocation": "Strip2",
+      "DropLocation": "LANE_100",
+      "Priority": "Normal"
+    },
+    {
+      "OffsetSeconds": 1500,
+      "PickLocation": "Strip2",
+      "DropLocation": "LANE_100",
+      "Priority": "Normal"
+    }
+  ]
+}

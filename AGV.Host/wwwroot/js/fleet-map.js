@@ -776,6 +776,38 @@
             return;
         }
 
+        const sc = target.closest('[data-sc]');
+        if (sc && window.fleetMap._dotNetRef) {
+            const el = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+            const act = sc.getAttribute('data-sc');
+            if (act === 'load') { const n = document.getElementById('sc-name'); if (n) n.value = el('sc-saved'); }
+            const msg = document.getElementById('sc-msg');
+            window.fleetMap._dotNetRef.invokeMethodAsync('ScenarioActionJs',
+                act, el('sc-name'), el('sc-saved'), el('sc-off'),
+                el('sc-pick'), el('sc-drop'), el('sc-pri'),
+                sc.getAttribute('data-idx') || '')
+                .then(t => { if (msg && t) msg.textContent = t; });
+            return;
+        }
+
+        const bb = target.closest('.builder-btn, .builder-close, .builder-submit');
+        if (bb && window.fleetMap._dotNetRef) {
+            const ref = window.fleetMap._dotNetRef;
+            if (bb.classList.contains('builder-btn'))
+                ref.invokeMethodAsync('ToggleBuilderJs');
+            else if (bb.classList.contains('builder-close'))
+                ref.invokeMethodAsync('CloseBuilderJs');
+            else {
+                const msg = document.getElementById('mb-msg');
+                ref.invokeMethodAsync('SubmitMissionJs',
+                    document.getElementById('mb-pick').value,
+                    document.getElementById('mb-drop').value,
+                    document.getElementById('mb-pri').value)
+                    .then(t => { if (msg) msg.textContent = t; });
+            }
+            return;
+        }
+
         const qb = target.closest('.queue-btn, .board-close, .board-cancel');
         if (qb && window.fleetMap._dotNetRef) {
             const ref = window.fleetMap._dotNetRef;
@@ -797,5 +829,60 @@
             return;
         }
     });
+
+    // ----------------------------------------------------------------
+    // Floating panels: drag by title, remember position, bring to front
+    // ----------------------------------------------------------------
+    (function () {
+        const SEL = '.vehicle-popup, .mission-board, .mission-builder, .scenario-dialog';
+        const saved = {};          // panel class -> last {left, top}
+        let topZ = 200;
+        let drag = null;
+
+        function place(el, left, top) {
+            const host = el.offsetParent || el.parentElement;
+            const maxL = Math.max(0, host.clientWidth - 60);
+            const maxT = Math.max(0, host.clientHeight - 30);
+            el.style.right = 'auto';
+            el.style.left = Math.min(Math.max(0, left), maxL) + 'px';
+            el.style.top = Math.min(Math.max(0, top), maxT) + 'px';
+        }
+
+        // A panel is a new element each time it opens: restore its last position.
+        new MutationObserver(function (muts) {
+            for (const m of muts) {
+                for (const n of m.addedNodes) {
+                    if (n.nodeType !== 1 || !n.matches || !n.matches(SEL)) continue;
+                    const p = saved[n.classList[0]];
+                    if (p) place(n, p.left, p.top);
+                    n.style.zIndex = ++topZ;
+                }
+            }
+        }).observe(document.body, { childList: true, subtree: true });
+
+        document.addEventListener('mousedown', function (e) {
+            const panel = e.target.closest(SEL);
+            if (!panel) return;
+            panel.style.zIndex = ++topZ;                      // bring to front
+            if (!e.target.closest('.popup-title') || e.target.closest('button')) return;
+            e.preventDefault();                               // no text selection while dragging
+            drag = {
+                panel, x: e.clientX, y: e.clientY,
+                left: panel.offsetLeft, top: panel.offsetTop
+            };
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (!drag) return;
+            place(drag.panel, drag.left + e.clientX - drag.x, drag.top + e.clientY - drag.y);
+        });
+
+        document.addEventListener('mouseup', function () {
+            if (!drag) return;
+            saved[drag.panel.classList[0]] =
+                { left: drag.panel.offsetLeft, top: drag.panel.offsetTop };
+            drag = null;
+        });
+    })();
 
 })();

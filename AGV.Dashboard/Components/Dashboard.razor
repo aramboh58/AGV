@@ -8,6 +8,7 @@
 @inject VehicleRegistry VehicleRegistry
 @inject DashboardBroadcaster Broadcaster
 @inject MissionBoardService MissionBoard
+@inject ScenarioService Scenarios
 @inject IJSRuntime JS
 @inject ILogger<Dashboard> Logger
 @inject CircuitCleanupRegistry CircuitCleanup
@@ -59,7 +60,11 @@
             <section class="counter-panel">
                 <div class="panel-label panel-label-row">
                     <span>MISSIONS</span>
-                    <button class="queue-btn @(_boardOpen ? "queue-btn-on" : "")">QUEUE</button>
+                    <span class="label-btns">
+                        <button class="scenario-btn @(_scOpen ? "queue-btn-on" : "")" data-sc="toggle">SIM</button>
+                        <button class="builder-btn @(_builderOpen ? "queue-btn-on" : "")">NEW</button>
+                        <button class="queue-btn @(_boardOpen ? "queue-btn-on" : "")">QUEUE</button>
+                    </span>
                 </div>
                 <div class="counters">
                     <div class="counter">
@@ -216,6 +221,146 @@
             </div>
         }
 
+
+        @if (_scOpen && _builderOptions is not null)
+        {
+            var showRun = _scRun is not null && _scShowRun;
+            <div class="scenario-dialog">
+                <button class="builder-close" data-sc="close">✕</button>
+                <div class="popup-title">SIMULATION CHOREOGRAPHY <span class="sc-tag">SIMULATION / DEMO ONLY</span></div>
+                <div class="sc-note">T+ is local (wall-clock) time since RUN is pressed.</div>
+
+                <div class="sc-toolbar">
+                    <input id="sc-name" class="builder-select sc-name" placeholder="Simulation name" maxlength="64" />
+                    <button class="sc-btn" data-sc="save">SAVE</button>
+                    <select id="sc-saved" class="builder-select sc-saved">
+                        @foreach (var n in _scSaved)
+                        {
+                            <option value="@n">@n</option>
+                        }
+                    </select>
+                    <button class="sc-btn" data-sc="load">LOAD</button>
+                    <button class="sc-btn" data-sc="delete">DELETE</button>
+                </div>
+
+                <div class="sc-toolbar">
+                    <input id="sc-off" class="builder-select sc-off" placeholder="T+ mm:ss" value="0:00" />
+                    <select id="sc-pick" class="builder-select">
+                        @foreach (var n in _builderOptions.PickLocations)
+                        {
+                            <option value="@n">@n</option>
+                        }
+                    </select>
+                    <select id="sc-drop" class="builder-select">
+                        @foreach (var n in _builderOptions.DropLocations)
+                        {
+                            <option value="@n">@n</option>
+                        }
+                    </select>
+                    <select id="sc-pri" class="builder-select sc-pri">
+                        @foreach (var p in _builderOptions.Priorities)
+                        {
+                            <option value="@p" selected="@(p == "Normal")">@p</option>
+                        }
+                    </select>
+                    <button class="sc-btn" data-sc="add">ADD</button>
+                </div>
+
+                <div class="sc-toolbar">
+                    <button class="sc-btn sc-run" data-sc="run">▶ RUN</button>
+                    <button class="sc-btn sc-stop" data-sc="stop">■ STOP</button>
+                    <button class="sc-btn" data-sc="clear">CLEAR</button>
+                    @if (showRun)
+                    {
+                        <span class="sc-runline">@_scRun!.Name · started @_scRun.StartedAt · T+ @FormatOffset(_scRun.ElapsedSeconds) · @(_scRun.Running ? "RUNNING" : "COMPLETE")</span>
+                    }
+                </div>
+                <div id="sc-msg" class="builder-msg"></div>
+
+                <div class="sc-gridwrap">
+                    <table class="sc-grid">
+                        <thead>
+                            <tr><th>#</th><th>T+</th><th>STAGED</th><th>MISSION</th><th>PICK</th><th>DROP</th><th>PRIORITY</th><th>VEHICLE</th><th>STATUS</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @if (showRun)
+                            {
+                                @foreach (var row in _scRun!.Rows)
+                                {
+                                    <tr>
+                                        <td>@(row.Index + 1)</td>
+                                        <td>@FormatOffset(row.OffsetSeconds)</td>
+                                        <td>@(row.StagedAt ?? "—")</td>
+                                        <td>@(row.MissionId is int mid ? $"M{mid}" : "—")</td>
+                                        <td>@row.Pick@(row.PickNode is int pn ? $" ({pn})" : "")</td>
+                                        <td>@row.Drop@(row.DropNode is int dn ? $" ({dn})" : "")</td>
+                                        <td>@row.Priority</td>
+                                        <td>@(row.VehicleId is int v ? $"F{v:D2}" : "—")</td>
+                                        <td class="sc-status-@row.Status.ToLowerInvariant()">@row.Status</td>
+                                        <td></td>
+                                    </tr>
+                                }
+                            }
+                            else
+                            {
+                                @for (var i = 0; i < _scDraft.Count; i++)
+                                {
+                                    var m = _scDraft[i];
+                                    <tr>
+                                        <td>@(i + 1)</td>
+                                        <td>@FormatOffset(m.OffsetSeconds)</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>@m.PickLocation</td>
+                                        <td>@m.DropLocation</td>
+                                        <td>@m.Priority</td>
+                                        <td>—</td>
+                                        <td class="sc-status-pending">Draft</td>
+                                        <td><button class="board-cancel" data-sc="remove" data-idx="@i" title="Remove">✕</button></td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+
+        @if (_builderOpen && _builderOptions is not null)
+        {
+            <div class="mission-builder">
+                <button class="builder-close">✕</button>
+                <div class="popup-title">NEW MISSION</div>
+
+                <div class="popup-section-label">PICK AT</div>
+                <select id="mb-pick" class="builder-select">
+                    @foreach (var n in _builderOptions.PickLocations)
+                    {
+                        <option value="@n">@n</option>
+                    }
+                </select>
+
+                <div class="popup-section-label">DROP AT</div>
+                <select id="mb-drop" class="builder-select">
+                    @foreach (var n in _builderOptions.DropLocations)
+                    {
+                        <option value="@n">@n</option>
+                    }
+                </select>
+
+                <div class="popup-section-label">PRIORITY</div>
+                <select id="mb-pri" class="builder-select">
+                    @foreach (var p in _builderOptions.Priorities)
+                    {
+                        <option value="@p" selected="@(p == "Normal")">@p</option>
+                    }
+                </select>
+
+                <button class="builder-submit">ENQUEUE</button>
+                <div id="mb-msg" class="builder-msg"></div>
+            </div>
+        }
+
         @if (_boardOpen && _board is not null)
         {
             <div class="mission-board">
@@ -274,6 +419,198 @@
 </div>
 
 @code {
+    // ----------------------------------------------------------------
+    // Simulation choreography (SIMULATION / DEMO ONLY). The draft lives in
+    // this circuit; playback lives in ScenarioService. Controls are plain
+    // HTML wired by fleet-map.js ([data-sc] buttons -> ScenarioActionJs).
+    // ----------------------------------------------------------------
+    private bool _scOpen;
+    private bool _scShowRun;
+    private readonly List<ScenarioMissionDef> _scDraft = new();
+    private List<string> _scSaved = new();
+    private ScenarioRunDto? _scRun;
+    private System.Threading.CancellationTokenSource? _scCts;
+
+    private static string FormatOffset(int seconds)
+        => seconds >= 3600
+            ? $"{seconds / 3600}:{seconds % 3600 / 60:D2}:{seconds % 60:D2}"
+            : $"{seconds / 60}:{seconds % 60:D2}";
+
+    private static bool TryParseOffset(string? text, out int seconds)
+    {
+        seconds = 0;
+        var parts = (text ?? "").Trim().Split(':');
+        if (parts.Length is < 1 or > 3) return false;
+        var total = 0;
+        foreach (var p in parts)
+        {
+            if (!int.TryParse(p, out var n) || n < 0) return false;
+            total = total * 60 + n;
+        }
+        seconds = total;
+        return true;
+    }
+
+    [JSInvokable]
+    public Task<string> ScenarioActionJs(
+        string action, string name, string saved, string offset,
+        string pick, string drop, string priority, string idx)
+    {
+        string msg = "";
+        try
+        {
+            var running = Scenarios.IsRunning;
+            switch (action)
+            {
+                case "toggle":
+                    if (_scOpen) CloseScenario(); else OpenScenario();
+                    break;
+                case "close":
+                    CloseScenario();
+                    break;
+                case "add":
+                    if (running) { msg = "Simulation running: stop it first."; break; }
+                    if (!TryParseOffset(offset, out var off)) { msg = "T+ must be seconds, mm:ss or h:mm:ss."; break; }
+                    _scDraft.Add(new ScenarioMissionDef(off, pick, drop, priority));
+                    var sorted = _scDraft.OrderBy(m => m.OffsetSeconds).ToList(); // stable
+                    _scDraft.Clear(); _scDraft.AddRange(sorted);
+                    _scShowRun = false;
+                    msg = $"{_scDraft.Count} mission(s) in draft.";
+                    break;
+                case "remove":
+                    if (running) { msg = "Simulation running: stop it first."; break; }
+                    if (int.TryParse(idx, out var i) && i >= 0 && i < _scDraft.Count) _scDraft.RemoveAt(i);
+                    break;
+                case "clear":
+                    if (running) { msg = "Simulation running: stop it first."; break; }
+                    _scDraft.Clear(); Scenarios.ClearRun(); _scRun = null; _scShowRun = false;
+                    break;
+                case "save":
+                    if (string.IsNullOrWhiteSpace(ScenarioService.SafeName(name))) { msg = "Enter a simulation name."; break; }
+                    if (_scDraft.Count == 0) { msg = "Nothing to save: add missions first."; break; }
+                    Scenarios.Save(new ScenarioDefinition(ScenarioService.SafeName(name), _scDraft.ToList()));
+                    _scSaved = Scenarios.ListSaved().ToList();
+                    msg = $"Saved '{ScenarioService.SafeName(name)}'.";
+                    break;
+                case "load":
+                    if (running) { msg = "Simulation running: stop it first."; break; }
+                    var def = Scenarios.Load(saved);
+                    if (def is null) { msg = "Pick a saved simulation to load."; break; }
+                    _scDraft.Clear(); _scDraft.AddRange(def.Missions);
+                    _scShowRun = false;
+                    msg = $"Loaded '{def.Name}' ({def.Missions.Count} missions).";
+                    break;
+                case "delete":
+                    msg = Scenarios.Delete(saved) ? $"Deleted '{saved}'." : "Pick a saved simulation to delete.";
+                    _scSaved = Scenarios.ListSaved().ToList();
+                    break;
+                case "run":
+                    var runName = ScenarioService.SafeName(name);
+                    if (runName.Length == 0) runName = "Unnamed";
+                    msg = Scenarios.Run(new ScenarioDefinition(runName, _scDraft.ToList()));
+                    _scRun = Scenarios.GetRun();
+                    _scShowRun = _scRun is not null;
+                    break;
+                case "stop":
+                    msg = Scenarios.Stop();
+                    _scRun = Scenarios.GetRun();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "ScenarioActionJs {Action} failed", action);
+            msg = $"Error: {ex.Message}";
+        }
+        StateHasChanged();
+        return Task.FromResult(msg);
+    }
+
+    private void OpenScenario()
+    {
+        _builderOptions ??= MissionBoard.GetBuilderOptions();
+        _scSaved = Scenarios.ListSaved().ToList();
+        _scRun = Scenarios.GetRun();
+        _scShowRun = _scRun?.Running == true;
+        _scOpen = true;
+        StopScenarioRefresh();
+        var cts = new System.Threading.CancellationTokenSource();
+        _scCts = cts;
+        _ = RunScenarioRefreshAsync(cts.Token);
+    }
+
+    private void CloseScenario()
+    {
+        StopScenarioRefresh();
+        _scOpen = false;
+    }
+
+    private void StopScenarioRefresh()
+    {
+        var cts = System.Threading.Interlocked.Exchange(ref _scCts, null);
+        if (cts is null) return;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        cts.Dispose();
+    }
+
+    private async Task RunScenarioRefreshAsync(System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new System.Threading.PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                try
+                {
+                    var snap = Scenarios.GetRun();
+                    SafeInvokeAsync(() =>
+                    {
+                        if (!ct.IsCancellationRequested)
+                        {
+                            _scRun = snap;
+                            StateHasChanged();
+                        }
+                        return Task.CompletedTask;
+                    }, nameof(RunScenarioRefreshAsync));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogError(ex, "Scenario refresh tick failed");
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    // ----------------------------------------------------------------
+    // Mission builder (#3). Controls are plain HTML read by fleet-map.js
+    // (Blazor events are not used on this page); only the option lists
+    // are rendered here.
+    // ----------------------------------------------------------------
+    private bool _builderOpen;
+    private MissionBuilderOptions? _builderOptions;
+
+    [JSInvokable]
+    public Task ToggleBuilderJs()
+    {
+        _builderOpen = !_builderOpen;
+        if (_builderOpen) _builderOptions ??= MissionBoard.GetBuilderOptions();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task CloseBuilderJs()
+    {
+        _builderOpen = false;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task<string> SubmitMissionJs(string pick, string drop, string priority)
+        => MissionBoard.CreateMissionAsync(pick, drop, priority);
+
     // ----------------------------------------------------------------
     // Mission queue viewer (#4). Per-circuit, like the vehicle popup:
     // polls MissionBoardService once a second only while open.
@@ -698,6 +1035,7 @@
         // closed circuit doesn't keep polling for a popup nobody sees.
         StopPopupRefresh();
         StopBoardRefresh();
+        StopScenarioRefresh();
     }
 
     // ----------------------------------------------------------------
