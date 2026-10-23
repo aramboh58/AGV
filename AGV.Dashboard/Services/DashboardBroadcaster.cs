@@ -232,7 +232,7 @@ namespace AGV.Dashboard.Services
                         var dto = new VehicleStateDto(
                             update.VehicleId,
                             update.SerialNumber,
-                            update.ActivityState.ToString(),
+                            DisplayState(update.VehicleId, update.ActivityState),
                             update.BatteryStateOfCharge,
                             update.IsCharging,
                             update.IsLoaded,
@@ -445,7 +445,32 @@ namespace AGV.Dashboard.Services
                 nextPart,
                 lockedNodes,
                 lockedMoves,
-                waitedNodes);
+                waitedNodes,
+                ModeOf(vehicle));
+        }
+
+        // ----------------------------------------------------------------
+        // Vehicle mode (Auto / Manual / OutOfService)
+        // ----------------------------------------------------------------
+
+        private static string ModeOf(AGV.Core.Entities.Vehicle v)
+            => !v.IsInService ? "OutOfService"
+             : v.IsManual ? "Manual"
+             : "Auto";
+
+        /// <summary>
+        /// The state string shown on the map and fleet grid: manual and
+        /// out-of-service override the vehicle's reported activity.
+        /// </summary>
+        private string DisplayState(int vehicleId, ActivityState reported)
+        {
+            var v = _registry.GetById(vehicleId);
+            if (v is not null)
+            {
+                if (!v.IsInService) return "OutOfService";
+                if (v.IsManual) return "Manual";
+            }
+            return reported.ToString();
         }
 
         // ----------------------------------------------------------------

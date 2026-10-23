@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -87,6 +87,28 @@ namespace AGV.Core.Interfaces
         /// </summary>
         Task ReturnVehicleToServiceAsync(
             int vehicleId,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Puts a vehicle in or out of manual mode. A manual vehicle stops
+        /// in place and keeps its mission, route and locked resources.
+        /// Returns false if the request does not apply (unknown vehicle,
+        /// out of service, or already in that mode).
+        /// </summary>
+        Task<bool> SetVehicleManualAsync(
+            int vehicleId,
+            bool manual,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Takes a vehicle out of service: it stops, its route is flushed,
+        /// and its mission stays with it. Locked nodes and moves are
+        /// released unless keepLocks is true. ReturnVehicleToServiceAsync
+        /// resumes the mission on a newly built route.
+        /// </summary>
+        Task<bool> TakeVehicleOutOfServiceAsync(
+            int vehicleId,
+            bool keepLocks,
             CancellationToken cancellationToken = default);
     }
 

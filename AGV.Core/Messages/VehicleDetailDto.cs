@@ -20,7 +20,8 @@ namespace AGV.Core.Messages
     MissionPartDto? NextPart,
     List<NodeRefDto> LockedNodes,
     List<MoveRefDto> LockedMoves,
-    List<NodeRefDto> WaitedNodes);
+    List<NodeRefDto> WaitedNodes,
+    string Mode = "Auto");
 
     /// <summary>
     /// A node id with its display name (null if unnamed). HeldByVehicleId

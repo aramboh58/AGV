@@ -1,5 +1,6 @@
 @page "/"
 @using AGV.Core.Enums
+@using AGV.Core.Interfaces
 @using AGV.Core.Messages
 @using AGV.Fleet.Infrastructure
 @using AGV.Dashboard.Services
@@ -9,6 +10,7 @@
 @inject DashboardBroadcaster Broadcaster
 @inject MissionBoardService MissionBoard
 @inject ScenarioService Scenarios
+@inject IFleetManager Fleet
 @inject IJSRuntime JS
 @inject ILogger<Dashboard> Logger
 @inject CircuitCleanupRegistry CircuitCleanup
@@ -130,6 +132,10 @@
                     <span class="popup-value">@_selectedVehicle.ActivityState</span>
                 </div>
                 <div class="popup-row">
+                    <span class="popup-label">MODE</span>
+                    <span class="popup-value">@_selectedVehicle.Mode</span>
+                </div>
+                <div class="popup-row">
                     <span class="popup-label">SOC</span>
                     <span class="popup-value">@_selectedVehicle.SocPercent.ToString("F0")%</span>
                 </div>
@@ -151,6 +157,33 @@
                         <span class="popup-value popup-part">@PartText(_selectedVehicle.NextPart)</span>
                     </div>
                 }
+                <div class="popup-section-label">CONTROL</div>
+                <div class="vc-buttons">
+                    @if (_selectedVehicle.Mode == "OutOfService")
+                    {
+                        <button class="vc-btn" data-vc="return" data-vid="@_selectedVehicle.VehicleId">RETURN TO SERVICE</button>
+                    }
+                    else
+                    {
+                        @if (_selectedVehicle.Mode == "Manual")
+                        {
+                            <button class="vc-btn" data-vc="auto" data-vid="@_selectedVehicle.VehicleId">AUTO</button>
+                        }
+                        else
+                        {
+                            <button class="vc-btn vc-manual" data-vc="manual" data-vid="@_selectedVehicle.VehicleId">MANUAL</button>
+                        }
+                        <button class="vc-btn vc-oos" data-vc="oos" data-vid="@_selectedVehicle.VehicleId">OUT OF SERVICE</button>
+                    }
+                </div>
+                @if (_selectedVehicle.Mode != "OutOfService")
+                {
+                    <label class="vc-keep" title="Out of service normally releases the vehicle's locked nodes and moves. Tick to keep them held.">
+                        <input type="checkbox" id="vc-keep" /> Keep locked nodes &amp; moves
+                    </label>
+                }
+                <div id="vc-msg" class="builder-msg"></div>
+
                 <div class="popup-section-label">SOC HISTORY</div>
                 <div class="popup-chart">
                     @{
@@ -419,6 +452,59 @@
 </div>
 
 @code {
+    // ----------------------------------------------------------------
+    // Vehicle control (manual / out of service). Buttons are plain HTML
+    // wired by fleet-map.js ([data-vc] -> VehicleControlJs).
+    // ----------------------------------------------------------------
+    [JSInvokable]
+    public async Task<string> VehicleControlJs(
+        string action, int vehicleId, bool keepLocks)
+    {
+        var name = $"F{vehicleId:D2}";
+        try
+        {
+            bool ok;
+            string msg;
+            switch (action)
+            {
+                case "manual":
+                    ok = await Fleet.SetVehicleManualAsync(vehicleId, true);
+                    msg = ok ? $"{name} is MANUAL: stopped, holding its locks."
+                             : $"{name}: not applicable.";
+                    break;
+                case "auto":
+                    ok = await Fleet.SetVehicleManualAsync(vehicleId, false);
+                    msg = ok ? $"{name} is AUTO: resuming."
+                             : $"{name}: not applicable.";
+                    break;
+                case "oos":
+                    ok = await Fleet.TakeVehicleOutOfServiceAsync(vehicleId, keepLocks);
+                    msg = ok ? $"{name} is OUT OF SERVICE (locks {(keepLocks ? "kept" : "released")})."
+                             : $"{name}: not applicable.";
+                    break;
+                case "return":
+                    await Fleet.ReturnVehicleToServiceAsync(vehicleId);
+                    msg = $"{name} returned to service.";
+                    break;
+                default:
+                    return "";
+            }
+
+            var detail = Broadcaster.GetVehicleDetail(vehicleId);
+            if (detail is not null && _selectedVehicle?.VehicleId == vehicleId)
+            {
+                _selectedVehicle = detail;
+                StateHasChanged();
+            }
+            return msg;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "VehicleControlJs {Action} F{Id} failed", action, vehicleId);
+            return $"Error: {ex.Message}";
+        }
+    }
+
     // ----------------------------------------------------------------
     // Simulation choreography (SIMULATION / DEMO ONLY). The draft lives in
     // this circuit; playback lives in ScenarioService. Controls are plain
@@ -942,6 +1028,8 @@
     private static string GetStateClass(string state) => state switch
     {
         "Idle"                  => "state-idle",
+        "Manual"                => "state-manual",
+        "OutOfService"          => "state-oos",
         "TravelingToPickup"     => "state-traveling",
         "ApproachingStand"      => "state-traveling",
         "TravelingLoaded"       => "state-loaded",
@@ -957,6 +1045,8 @@
     private static string GetStateAbbrev(string state) => state switch
     {
         "Idle"                  => "IDLE",
+        "Manual"                => "MAN",
+        "OutOfService"          => "OOS",
         "TravelingToPickup"     => "→PKP",
         "ApproachingStand"      => "→STD",
         "TravelingLoaded"       => "→DRP",

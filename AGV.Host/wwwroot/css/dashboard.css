@@ -969,3 +969,69 @@ html, body {
 .scenario-dialog {
     min-width: 520px;
 }
+/* Vehicle service / manual */
+.vehicle-group.state-manual .vehicle-shape {
+    fill: var(--accent-yellow);
+    stroke: var(--accent-yellow);
+}
+
+.vehicle-group.state-oos .vehicle-shape {
+    fill: #6b7280;
+    stroke: #9ca3af;
+    opacity: .7;
+}
+
+.vehicle-card.state-manual {
+    border-left: 3px solid var(--accent-yellow);
+}
+
+.vehicle-card.state-oos {
+    border-left: 3px solid #6b7280;
+    opacity: .7;
+}
+
+.state-manual .vc-state {
+    color: var(--accent-yellow);
+}
+
+.state-oos .vc-state {
+    color: #9ca3af;
+}
+
+.vc-buttons {
+    display: flex;
+    gap: 6px;
+    margin: 4px 0;
+}
+
+.vc-btn {
+    flex: 1;
+    padding: 4px 6px;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    background: #1f2937;
+    color: #e5e7eb;
+    border: 1px solid #4b5563;
+    border-radius: 3px;
+}
+
+    .vc-btn:hover {
+        background: #374151;
+    }
+
+.vc-manual {
+    border-color: var(--accent-yellow);
+    color: var(--accent-yellow);
+}
+
+.vc-oos {
+    border-color: #9ca3af;
+}
+
+.vc-keep {
+    display: block;
+    font-size: 11px;
+    color: #9ca3af;
+    margin: 4px 0;
+}

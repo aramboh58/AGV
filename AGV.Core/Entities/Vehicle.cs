@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.ComponentModel.DataAnnotations.Schema;
 
 using AGV.Core.Enums;
 
@@ -134,6 +135,13 @@ namespace AGV.Core.Entities
         public IReadOnlyList<int> PlannedRouteNodeIds { get; private set; }
             = Array.Empty<int>();
 
+        /// <summary>
+        /// True while the vehicle is held in manual mode: stopped in place,
+        /// still owning its mission, route and locked resources.
+        /// </summary>
+        [NotMapped]
+        public bool IsManual { get; private set; }
+
         // Private constructor for EF Core
         private Vehicle()
         {
@@ -238,6 +246,17 @@ namespace AGV.Core.Entities
         }
 
         /// <summary>
+        /// Forgets the planned route but keeps the mission assignment.
+        /// Used when a vehicle is taken out of service: a new route is
+        /// built when it returns.
+        /// </summary>
+        public void ClearPlannedRoute()
+            => PlannedRouteNodeIds = Array.Empty<int>();
+
+        /// <summary>Sets or clears manual mode.</summary>
+        public void SetManual(bool manual) => IsManual = manual;
+
+        /// <summary>
         /// Clears the current mission assignment.
         /// Called when a mission completes or fails.
         /// </summary>
@@ -276,8 +295,15 @@ namespace AGV.Core.Entities
         public void ReturnToService()
         {
             IsInService = true;
-            ActivityState = ActivityState.Idle;
-            OrderState = OrderState.Idle;
+            IsManual = false;
+
+            // A vehicle that still has its mission keeps its activity and
+            // order state so it resumes rather than looking idle/available.
+            if (!CurrentMissionId.HasValue)
+            {
+                ActivityState = ActivityState.Idle;
+                OrderState = OrderState.Idle;
+            }
         }
 
         /// <summary>
@@ -295,6 +321,7 @@ namespace AGV.Core.Entities
         /// </summary>
         public bool IsAvailableForDispatch
             => IsInService
+            && !IsManual
             && IsOnline
             && OrderState == OrderState.Idle
             && ActivityState == ActivityState.Idle

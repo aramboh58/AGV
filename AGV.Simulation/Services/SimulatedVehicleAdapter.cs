@@ -166,6 +166,14 @@ namespace AGV.Simulation.Services
                             ActivityState.Idle, "cancelOrder received");
                         break;
 
+                    case "startpause":
+                        state.IsPaused = true;
+                        break;
+
+                    case "stoppause":
+                        state.IsPaused = false;
+                        break;
+
                     case "waitfortrigger":
                         state.IsWaitingForTrigger = true;
                         state.TriggerId = action.Parameters
@@ -362,8 +370,10 @@ namespace AGV.Simulation.Services
             else if (activity == ActivityState.MaintenanceCharge)
                 state.Battery.ChargeAfterMaintenance(elapsedSeconds);
 
-            // Advance travel if vehicle is moving
-            if (state.StateMachine.IsTraveling
+            // Advance travel if vehicle is moving (not while paused:
+            // manual mode or out of service)
+            if (!state.IsPaused
+                && state.StateMachine.IsTraveling
                 && state.PendingOrder is not null
                 && !state.IsWaitingForTrigger)
             {
@@ -372,7 +382,7 @@ namespace AGV.Simulation.Services
             }
 
             // Advance fork operations
-            if (state.StateMachine.IsForking)
+            if (!state.IsPaused && state.StateMachine.IsForking)
             {
                 await AdvanceForkingAsync(
                     state, elapsedSeconds, cancellationToken);
@@ -669,6 +679,10 @@ namespace AGV.Simulation.Services
 
         // Fork operation timing
         public decimal ForkOperationTimer { get; set; }  // seconds
+
+        // startPause / stopPause: vehicle holds position and keeps its
+        // state (manual mode, out of service)
+        public bool IsPaused { get; set; }
 
         // waitForTrigger state
         public bool IsWaitingForTrigger { get; set; }

@@ -68,6 +68,15 @@ namespace AGV.Fleet.Services
         // earliest time to retry routing a drop leg that found no route.
         private readonly ConcurrentDictionary<int, int> _dropLegSent = new();
         private readonly ConcurrentDictionary<int, DateTime> _dropLegRetryAt = new();
+
+        // Vehicles returned to service that still owe a route to their
+        // pickup, with the earliest time to retry when none was found.
+        private readonly ConcurrentDictionary<int, bool> _resumePickup = new();
+        private readonly ConcurrentDictionary<int, DateTime> _resumeRetryAt = new();
+
+        // Vehicles held (paused) until the order that resumes their mission
+        // has been delivered; the pause is then released.
+        private readonly ConcurrentDictionary<int, bool> _resumeAfterOrder = new();
         public FleetManagerService(
             VehicleRegistry registry,
             ActiveMissionRegistry activeMissions,
@@ -210,18 +219,152 @@ namespace AGV.Fleet.Services
                 vehicleId, reason);
         }
 
-        public Task ReturnVehicleToServiceAsync(
+        public async Task ReturnVehicleToServiceAsync(
             int vehicleId,
             CancellationToken cancellationToken = default)
         {
             var vehicle = _registry.GetById(vehicleId);
-            if (vehicle is null) return Task.CompletedTask;
+            if (vehicle is null || vehicle.IsInService) return;
+
+            // Any locks kept while out of service are dropped: the resumed
+            // route locks what it needs as it goes.
+            _windows.Cancel(vehicleId);
+            await _traffic.ReleaseAllLocksAsync(vehicleId, cancellationToken);
+            _dropLegSent.TryRemove(vehicleId, out _);
+            _dropLegRetryAt.TryRemove(vehicleId, out _);
+            _resumeRetryAt.TryRemove(vehicleId, out _);
 
             vehicle.ReturnToService();
+
+            var mission = _activeMissions.GetByVehicle(vehicleId);
+            var hasMission = mission is not null
+                && vehicle.CurrentMissionId.HasValue;
+
+            if (hasMission && vehicle.IsLoaded
+                && vehicle.ActivityState == ActivityState.TravelingLoaded)
+            {
+                // The drop leg is re-routed from the vehicle's node by the
+                // normal drop-leg logic on its next state update; release
+                // the pause once that order has been delivered.
+                _resumeAfterOrder[vehicleId] = true;
+            }
+            else if (hasMission && !vehicle.IsLoaded
+                && vehicle.ActivityState != ActivityState.Picking
+                && vehicle.ActivityState != ActivityState.Dropping)
+            {
+                // Resume toward the pickup on a new route.
+                _resumePickup[vehicleId] = true;
+                _resumeAfterOrder[vehicleId] = true;
+            }
+            else
+            {
+                // Idle, or in the middle of a pick/drop: just carry on.
+                await SendPauseAsync(vehicle, false, cancellationToken);
+            }
+
             _logger.LogInformation(
-                "Vehicle {VehicleId} returned to service",
-                vehicleId);
-            return Task.CompletedTask;
+                "Vehicle {VehicleId} returned to service (mission {MissionId})",
+                vehicleId, vehicle.CurrentMissionId);
+        }
+
+        public async Task<bool> SetVehicleManualAsync(
+            int vehicleId,
+            bool manual,
+            CancellationToken cancellationToken = default)
+        {
+            var vehicle = _registry.GetById(vehicleId);
+            if (vehicle is null || !vehicle.IsInService
+                || vehicle.IsManual == manual)
+                return false;
+
+            vehicle.SetManual(manual);
+            await SendPauseAsync(vehicle, manual, cancellationToken);
+
+            if (!manual)
+                await PublishRemainingRouteAsync(vehicle, cancellationToken);
+
+            _logger.LogInformation(
+                "Vehicle {VehicleId} {Mode}",
+                vehicleId, manual ? "set to MANUAL" : "returned to AUTO");
+            return true;
+        }
+
+        public async Task<bool> TakeVehicleOutOfServiceAsync(
+            int vehicleId,
+            bool keepLocks,
+            CancellationToken cancellationToken = default)
+        {
+            var vehicle = _registry.GetById(vehicleId);
+            if (vehicle is null || !vehicle.IsInService) return false;
+
+            // Stop the vehicle, then flush its route. The mission stays.
+            await SendPauseAsync(vehicle, true, cancellationToken);
+            _windows.Cancel(vehicleId);
+            if (!keepLocks)
+                await _traffic.ReleaseAllLocksAsync(vehicleId, cancellationToken);
+
+            _dropLegSent.TryRemove(vehicleId, out _);
+            _dropLegRetryAt.TryRemove(vehicleId, out _);
+            _resumePickup.TryRemove(vehicleId, out _);
+            _resumeRetryAt.TryRemove(vehicleId, out _);
+            _resumeAfterOrder.TryRemove(vehicleId, out _);
+
+            vehicle.ClearPlannedRoute();
+            vehicle.SetManual(false);
+            vehicle.TakeOutOfService();
+
+            // Tell the dashboard the route is gone.
+            await _channels.MissionUpdates.Writer.WriteAsync(
+                new VehicleMissionUpdate(
+                    vehicleId, vehicle.CurrentMissionId, Array.Empty<int>()),
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Vehicle {VehicleId} taken out of service " +
+                "(mission {MissionId} kept, locks {Locks})",
+                vehicleId, vehicle.CurrentMissionId,
+                keepLocks ? "KEPT" : "released");
+            return true;
+        }
+
+        private Task SendPauseAsync(
+            Vehicle vehicle, bool pause, CancellationToken cancellationToken)
+            => _adapter.SendInstantActionAsync(
+                vehicle.SerialNumber,
+                new VehicleInstantAction
+                {
+                    HeaderId = Guid.NewGuid().ToString("N")[..8],
+                    InstantActions = new[]
+                    {
+                        new OrderAction
+                        {
+                            ActionId = Guid.NewGuid().ToString("N")[..8],
+                            ActionType = pause ? "startPause" : "stopPause",
+                            BlockingType = "HARD",
+                        }
+                    },
+                },
+                cancellationToken);
+
+        /// <summary>
+        /// After manual mode ends, re-sends the remaining part of the
+        /// planned route to the dashboard so the map continues from the
+        /// vehicle's node.
+        /// </summary>
+        private async Task PublishRemainingRouteAsync(
+            Vehicle vehicle, CancellationToken cancellationToken)
+        {
+            var planned = vehicle.PlannedRouteNodeIds;
+            if (planned.Count == 0 || !vehicle.CurrentMissionId.HasValue) return;
+
+            var list = planned.ToList();
+            var idx = vehicle.CurrentNodeId is int cur ? list.IndexOf(cur) : -1;
+            var remaining = idx > 0 ? list.Skip(idx).ToList() : list;
+
+            await _channels.MissionUpdates.Writer.WriteAsync(
+                new VehicleMissionUpdate(
+                    vehicle.VehicleId, vehicle.CurrentMissionId, remaining),
+                cancellationToken);
         }
 
         // ----------------------------------------------------------------
@@ -451,13 +594,18 @@ namespace AGV.Fleet.Services
                 vehicle.UpdatePosition(update.LastNodeId,
                     vehicle.CurrentMapId);
 
-                // Slide the lock window as the vehicle reaches nodes
-                await _windows.OnVehicleStateAsync(
-                    vehicle.VehicleId, update.LastNodeId, stoppingToken);
+                // Slide the lock window as the vehicle reaches nodes.
+                // A manual vehicle holds what it has: no sliding.
+                if (vehicle.IsInService && !vehicle.IsManual)
+                    await _windows.OnVehicleStateAsync(
+                        vehicle.VehicleId, update.LastNodeId, stoppingToken);
             }
 
             // Picked up: send the drop leg as a new order
             await TryDispatchDropLegAsync(vehicle, update, stoppingToken);
+
+            // Returned to service before its pickup: route there now
+            await TryDispatchResumePickupAsync(vehicle, stoppingToken);
 
             // Check for connection/error states
             if (update.Errors.Count > 0)
@@ -517,6 +665,7 @@ namespace AGV.Fleet.Services
             CancellationToken stoppingToken)
         {
             if (!vehicle.CurrentMissionId.HasValue) return;
+            if (!vehicle.IsInService || vehicle.IsManual) return;
             if (!update.IsLoaded
                 || update.ActivityState != ActivityState.TravelingLoaded)
                 return;
@@ -594,6 +743,93 @@ namespace AGV.Fleet.Services
                 route.EstimatedTravelTimeSeconds, route.Nodes.Count);
         }
 
+        /// <summary>
+        /// A vehicle returned to service before reaching its pickup gets a
+        /// new route from wherever it is. Retries every two seconds when
+        /// no route is available.
+        /// </summary>
+        private async Task TryDispatchResumePickupAsync(
+            Vehicle vehicle,
+            CancellationToken stoppingToken)
+        {
+            if (!_resumePickup.ContainsKey(vehicle.VehicleId)) return;
+            if (!vehicle.IsInService || vehicle.IsManual) return;
+
+            var mission = _activeMissions.GetByVehicle(vehicle.VehicleId);
+            if (mission is null || vehicle.IsLoaded)
+            {
+                _resumePickup.TryRemove(vehicle.VehicleId, out _);
+                await SendPauseAsync(vehicle, false, stoppingToken);
+                return;
+            }
+
+            if (_resumeRetryAt.TryGetValue(vehicle.VehicleId, out var retryAt)
+                && DateTime.UtcNow < retryAt)
+                return;
+
+            var route = await _routing.FindRouteAsync(
+                vehicle.CurrentNodeId ?? 0,
+                mission.PickupNodeId,
+                vehicle.VehicleId,
+                _traffic.GetLockedNodeIds(),
+                _traffic.GetLockedMoveIds(),
+                stoppingToken);
+
+            if (route is null)
+            {
+                _resumeRetryAt[vehicle.VehicleId] =
+                    DateTime.UtcNow.AddSeconds(2);
+                _dispatchLogger.LogWarning(
+                    "No route for resumed vehicle {VehicleId} from node " +
+                    "{From} to pickup {PickupNodeId} (mission {MissionId}) " +
+                    "— retrying",
+                    vehicle.VehicleId, vehicle.CurrentNodeId,
+                    mission.PickupNodeId, mission.MissionId);
+                return;
+            }
+
+            _resumePickup.TryRemove(vehicle.VehicleId, out _);
+            _resumeRetryAt.TryRemove(vehicle.VehicleId, out _);
+
+            var orderId = Guid.NewGuid().ToString("N")[..8].ToUpper();
+            _activeMissions.Set(
+                vehicle.VehicleId, mission with { CurrentOrderId = orderId });
+
+            var routeNodeIds = route.Nodes
+                .Select(n => n.NodeId).ToList().AsReadOnly();
+
+            vehicle.AssignMission(mission.MissionId, routeNodeIds);
+            vehicle.UpdateState(
+                ActivityState.TravelingToPickup, OrderState.Waiting);
+
+            await _channels.DispatchDecisions.Writer.WriteAsync(
+                new MissionDispatchDecision
+                {
+                    MissionId = mission.MissionId,
+                    OrderId = orderId,
+                    VehicleId = vehicle.VehicleId,
+                    SerialNumber = vehicle.SerialNumber,
+                    RouteNodeIds = routeNodeIds,
+                    RouteMoveIds = route.MoveIds,
+                    PickupAssignmentId = mission.PickupNodeId,
+                    DropoffAssignmentId = mission.DropNodeId,
+                    EstimatedTravelTimeSeconds =
+                        route.EstimatedTravelTimeSeconds,
+                }, stoppingToken);
+
+            await _channels.MissionUpdates.Writer.WriteAsync(
+                new VehicleMissionUpdate(
+                    vehicle.VehicleId, mission.MissionId, routeNodeIds),
+                stoppingToken);
+
+            _dispatchLogger.LogInformation(
+                "Resume: vehicle {VehicleId} mission {MissionId} " +
+                "node {From} → pickup {PickupNodeId} (route {Hops} hops)",
+                vehicle.VehicleId, mission.MissionId,
+                vehicle.CurrentNodeId, mission.PickupNodeId,
+                route.Nodes.Count);
+        }
+
         // ----------------------------------------------------------------
         // Mission transfer processing
         // ----------------------------------------------------------------
@@ -607,15 +843,31 @@ namespace AGV.Fleet.Services
             await _traffic.ReleaseAllLocksAsync(
                 transfer.FromVehicleId, stoppingToken);
 
+            // Take the full mission BEFORE it is removed from the registry.
+            // The transfer's own MissionContext can be a stub (fault and
+            // deadlock paths), which would lose pickup, drop, parts and
+            // SourceSystemReference.
+            var activeMission =
+                _activeMissions.GetByVehicle(transfer.FromVehicleId);
+
             var fromVehicle = _registry.GetById(transfer.FromVehicleId);
             fromVehicle?.ClearMission();
             _activeMissions.Remove(transfer.FromVehicleId);
             _dropLegSent.TryRemove(transfer.FromVehicleId, out _);
             _dropLegRetryAt.TryRemove(transfer.FromVehicleId, out _);
 
-            var context = transfer.MissionContext;
+            var context = activeMission ?? transfer.MissionContext;
 
-            if (transfer.ReturnToQueue || !transfer.HasReceivingVehicle)
+            if (context.MissionId <= 0)
+            {
+                // No real mission behind this transfer (e.g. the deadlock
+                // stub on a vehicle that has none): nothing to re-queue.
+                _logger.LogWarning(
+                    "Transfer from vehicle {VehicleId} carries no mission " +
+                    "(reason={Reason}) — nothing re-queued",
+                    transfer.FromVehicleId, transfer.Reason);
+            }
+            else if (transfer.ReturnToQueue || !transfer.HasReceivingVehicle)
             {
                 // Re-queue with escalated priority
                 var escalated = context.WithTransfer(
@@ -802,7 +1054,11 @@ namespace AGV.Fleet.Services
                         decision.RouteNodeIds,
                         decision.RouteMoveIds,
                         stoppingToken))
+                {
+                    await ReleaseResumePauseAsync(
+                        decision.VehicleId, stoppingToken);
                     continue;
+                }
 
                 var order = new VehicleOrder
                 {
@@ -825,7 +1081,23 @@ namespace AGV.Fleet.Services
 
                 await _adapter.SendOrderAsync(
                     decision.SerialNumber, order, stoppingToken);
+
+                await ReleaseResumePauseAsync(
+                    decision.VehicleId, stoppingToken);
             }
+        }
+
+        /// <summary>
+        /// A vehicle returned to service is held until the order that
+        /// resumes its mission has been delivered, then released.
+        /// </summary>
+        private async Task ReleaseResumePauseAsync(
+            int vehicleId, CancellationToken stoppingToken)
+        {
+            if (!_resumeAfterOrder.TryRemove(vehicleId, out _)) return;
+            var vehicle = _registry.GetById(vehicleId);
+            if (vehicle is not null)
+                await SendPauseAsync(vehicle, false, stoppingToken);
         }
     }
 }

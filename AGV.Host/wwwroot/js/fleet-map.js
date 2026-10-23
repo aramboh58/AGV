@@ -517,6 +517,20 @@
         const v = vehicles[vehicleId];
         if (!v) return;
 
+        // Manual / out of service: freeze the client's own route walking
+        // (the vehicle is stopped on the server). Only on the transition,
+        // so a route sent when the vehicle resumes is not cancelled by a
+        // late state batch.
+        const frozenNow = activityState === 'Manual' || activityState === 'OutOfService';
+        if (frozenNow && !v.frozen) {
+            v.frozen = true;
+            v.routeActive = false;
+            v.routeVersion = (v.routeVersion || 0) + 1;
+            delete animTargets[vehicleId];
+        } else if (!frozenNow && v.frozen) {
+            v.frozen = false;
+        }
+
         const stateClass = activityStateToClass(activityState);
         if (v.state !== stateClass) {
             v.group.setAttribute('class', `vehicle-group ${stateClass}`);
@@ -659,6 +673,10 @@
     // ----------------------------------------------------------------
     function activityStateToClass(state) {
         switch (state) {
+            case 'Manual':
+                return 'state-manual';
+            case 'OutOfService':
+                return 'state-oos';
             case 'TravelingToPickup':
             case 'ApproachingStand':
             case 'TravelingEmpty':
@@ -681,6 +699,8 @@
     function stateLabelColor(state) {
         switch (state) {
             case 'Idle': return '#94a3b8';
+            case 'OutOfService': return '#9ca3af';
+            case 'Manual': return '#fde047';
             default: return '#ffffff';
         }
     }
@@ -773,6 +793,18 @@
                         .then(() => console.log(`  → invokeMethodAsync resolved for V${vid} @ ${performance.now().toFixed(0)}ms (took ${(performance.now() - invokeStart).toFixed(0)}ms)`));
                 }
             }, 0);
+            return;
+        }
+
+        const vc = target.closest('[data-vc]');
+        if (vc && window.fleetMap._dotNetRef) {
+            const keep = document.getElementById('vc-keep');
+            const msg = document.getElementById('vc-msg');
+            window.fleetMap._dotNetRef.invokeMethodAsync('VehicleControlJs',
+                vc.getAttribute('data-vc'),
+                parseInt(vc.getAttribute('data-vid')),
+                !!(keep && keep.checked))
+                .then(t => { if (msg && t) msg.textContent = t; });
             return;
         }
 
