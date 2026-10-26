@@ -21,7 +21,8 @@ namespace AGV.Core.Messages
     List<NodeRefDto> LockedNodes,
     List<MoveRefDto> LockedMoves,
     List<NodeRefDto> WaitedNodes,
-    string Mode = "Auto");
+    string Mode = "Auto",
+    decimal DistanceSinceLastNodeCm = 0m);
 
     /// <summary>
     /// A node id with its display name (null if unnamed). HeldByVehicleId

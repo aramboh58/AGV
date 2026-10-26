@@ -446,7 +446,8 @@ namespace AGV.Dashboard.Services
                 lockedNodes,
                 lockedMoves,
                 waitedNodes,
-                ModeOf(vehicle));
+                ModeOf(vehicle),
+                vehicle.DistanceSinceLastNodeCm);
         }
 
         // ----------------------------------------------------------------

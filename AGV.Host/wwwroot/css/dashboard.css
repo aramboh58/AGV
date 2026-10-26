@@ -496,7 +496,7 @@ html, body {
     position: absolute;
     top: 44px;
     left: 12px;
-    width: 220px;
+    width: 260px;
     background: var(--bg-panel);
     border: 1px solid var(--border-bright);
     border-radius: 4px;
@@ -507,6 +507,12 @@ html, body {
     gap: 6px;
     max-height: calc(100% - 56px);
     overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* One scrolling pane: sections keep their natural height */
+.vehicle-popup > * {
+    flex-shrink: 0;
 }
 
 .popup-close {
@@ -573,7 +579,7 @@ html, body {
 
 .soc-sparkline {
     width: 100%;
-    height: 40px;
+    height: 28px;
     display: block;
 }
 
@@ -593,8 +599,6 @@ html, body {
     display: flex;
     flex-wrap: wrap;
     gap: 3px;
-    max-height: 80px;
-    overflow-y: auto;
 }
 
 .route-node {
@@ -1034,4 +1038,26 @@ html, body {
     font-size: 11px;
     color: #9ca3af;
     margin: 4px 0;
+}
+
+/* Loaded marker */
+.vehicle-group .load-marker {
+    display: none;
+    fill: #f59e0b;
+    stroke: #ffffff;
+    stroke-width: 1;
+}
+
+.vehicle-group.has-load .load-marker {
+    display: block;
+}
+
+.vc-load {
+    color: #f59e0b;
+    margin-left: 4px;
+    font-size: 10px;
+}
+
+.vehicle-card.has-load {
+    box-shadow: inset 0 0 0 1px #f59e0b;
 }

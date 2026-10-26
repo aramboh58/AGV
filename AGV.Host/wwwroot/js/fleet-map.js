@@ -387,6 +387,17 @@
             g.appendChild(hitArea);
 
             g.appendChild(path);
+
+            // Load marker: sits on the forks, shown only while loaded
+            const loadMark = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            loadMark.setAttribute('class', 'load-marker');
+            loadMark.setAttribute('x', '-17');
+            loadMark.setAttribute('y', '-4');
+            loadMark.setAttribute('width', '8');
+            loadMark.setAttribute('height', '8');
+            loadMark.setAttribute('pointer-events', 'none');
+            g.appendChild(loadMark);
+
             g.appendChild(label);
             vehicleLayer.appendChild(g);
 
@@ -395,6 +406,7 @@
                 path: path,
                 label: label,
                 state: 'state-idle',
+                loaded: false,
                 positioned: false,
                 currentX: -100,
                 currentY: -100,
@@ -513,7 +525,7 @@
         startAnimLoop();
     }
 
-    function applyStateUpdate(vehicleId, activityState, vehicleType) {
+    function applyStateUpdate(vehicleId, activityState, vehicleType, isLoaded) {
         const v = vehicles[vehicleId];
         if (!v) return;
 
@@ -532,9 +544,12 @@
         }
 
         const stateClass = activityStateToClass(activityState);
-        if (v.state !== stateClass) {
-            v.group.setAttribute('class', `vehicle-group ${stateClass}`);
+        const loaded = !!isLoaded;
+        if (v.state !== stateClass || v.loaded !== loaded) {
+            v.group.setAttribute('class',
+                `vehicle-group ${stateClass}${loaded ? ' has-load' : ''}`);
             v.state = stateClass;
+            v.loaded = loaded;
         }
 
         if (vehicleType && vehicleType !== v.vehicleType) {
@@ -561,8 +576,8 @@
             applyPositionUpdate(vehicleId, x, y, nodeId, heading);
         },
 
-        updateState: function (vehicleId, activityState, vehicleType) {
-            applyStateUpdate(vehicleId, activityState, vehicleType);
+        updateState: function (vehicleId, activityState, vehicleType, isLoaded) {
+            applyStateUpdate(vehicleId, activityState, vehicleType, isLoaded);
         },
 
         // Batched entry points — one JS interop call per flush cycle,
@@ -582,7 +597,8 @@
             if (!batch) return;
             for (const item of batch) {
                 applyStateUpdate(
-                    item.vehicleId, item.activityState, item.vehicleType);
+                    item.vehicleId, item.activityState, item.vehicleType,
+                    item.isLoaded);
             }
         },
 

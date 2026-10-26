@@ -142,6 +142,14 @@ namespace AGV.Core.Entities
         [NotMapped]
         public bool IsManual { get; private set; }
 
+        /// <summary>
+        /// Distance (cm) travelled from the last reported node along the
+        /// move toward the next node. Zero when stationary. Set by the
+        /// vehicle adapter (VDA distanceSinceLastNode); runtime only.
+        /// </summary>
+        [NotMapped]
+        public decimal DistanceSinceLastNodeCm { get; set; }
+
         // Private constructor for EF Core
         private Vehicle()
         {

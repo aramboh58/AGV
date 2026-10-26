@@ -586,6 +586,13 @@ namespace AGV.Simulation.Services
             SimulatedVehicleState state,
             CancellationToken cancellationToken)
         {
+            // Distance along the current move from the last node
+            state.Vehicle.DistanceSinceLastNodeCm =
+                state.PendingOrder is not null
+                && state.StateMachine.IsTraveling
+                    ? (decimal)state.TravelProgress
+                    : 0m;
+
             var update = new VehicleStateUpdate
             {
                 VehicleId = state.Vehicle.VehicleId,

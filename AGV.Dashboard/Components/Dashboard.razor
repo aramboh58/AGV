@@ -91,9 +91,15 @@
                 <div class="vehicle-grid">
                     @foreach (var v in _vehicleStates.Values.OrderBy(v => v.VehicleId))
                     {
-                        <div class="vehicle-card @GetStateClass(v.ActivityState)">
+                        <div class="vehicle-card @GetStateClass(v.ActivityState) @LoadClass(v.IsLoaded)">
                             <div class="vc-id">F@(v.VehicleId.ToString("D2"))</div>
-                            <div class="vc-state">@GetStateAbbrev(v.ActivityState)</div>
+                            <div class="vc-state">
+                                @GetStateAbbrev(v.ActivityState)
+                                @if (v.IsLoaded)
+                                {
+                                    <span class="vc-load" title="Loaded">&#9632;</span>
+                                }
+                            </div>
                             <div class="vc-soc">
                                 <div class="soc-bar">
                                     <div class="soc-fill @GetSocClass(v.SocPercent)"
@@ -130,6 +136,18 @@
                 <div class="popup-row">
                     <span class="popup-label">STATE</span>
                     <span class="popup-value">@_selectedVehicle.ActivityState</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">AT NODE</span>
+                    <span class="popup-value">@(_selectedVehicle.CurrentNodeId?.ToString() ?? "—")</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">ALONG</span>
+                    <span class="popup-value">@AlongText(_selectedVehicle)</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">LOADED</span>
+                    <span class="popup-value">@(_selectedVehicle.IsLoaded ? "YES" : "NO")</span>
                 </div>
                 <div class="popup-row">
                     <span class="popup-label">MODE</span>
@@ -184,28 +202,6 @@
                 }
                 <div id="vc-msg" class="builder-msg"></div>
 
-                <div class="popup-section-label">SOC HISTORY</div>
-                <div class="popup-chart">
-                    @{
-                        var max = 100.0;
-                        var min = 0.0;
-                        var range = 100.0;
-                    }
-                    <svg class="soc-sparkline" viewBox="0 0 150 40" preserveAspectRatio="none">
-                        @if (_selectedVehicle.SocHistory.Count > 1)
-                        {
-                            var points = _selectedVehicle.SocHistory
-                            .Select((s, i) =>
-                            {
-                                var x = i * 150.0 / (_selectedVehicle.SocHistory.Count - 1);
-                                var y = 40 - ((double)s - min) / range * 35;
-                                return $"{x:F1},{y:F1}";
-                            });
-                            <polyline points="@string.Join(" ", points)"
-                                      fill="none" stroke="#06b6d4" stroke-width="1.5" />
-                        }
-                    </svg>
-                </div>
                 <div class="popup-section-label">ROUTE</div>
                 <div class="popup-route">
                     @foreach (var nodeId in _selectedVehicle.RouteNodeIds)
@@ -250,6 +246,29 @@
                     {
                         <span class="route-node route-node-wait" title="@n.NodeId">@WaitText(n)</span>
                     }
+                </div>
+
+                <div class="popup-section-label">SOC HISTORY</div>
+                <div class="popup-chart">
+                    @{
+                        var max = 100.0;
+                        var min = 0.0;
+                        var range = 100.0;
+                    }
+                    <svg class="soc-sparkline" viewBox="0 0 150 40" preserveAspectRatio="none">
+                        @if (_selectedVehicle.SocHistory.Count > 1)
+                        {
+                            var points = _selectedVehicle.SocHistory
+                            .Select((s, i) =>
+                            {
+                                var x = i * 150.0 / (_selectedVehicle.SocHistory.Count - 1);
+                                var y = 40 - ((double)s - min) / range * 35;
+                                return $"{x:F1},{y:F1}";
+                            });
+                            <polyline points="@string.Join(" ", points)"
+                                      fill="none" stroke="#06b6d4" stroke-width="1.5" />
+                        }
+                    </svg>
                 </div>
             </div>
         }
@@ -1024,6 +1043,22 @@
     // ----------------------------------------------------------------
     // Helper methods
     // ----------------------------------------------------------------
+
+    // Distance from the last reported node toward the next route node
+    private static string AlongText(VehicleDetailDto v)
+    {
+        if (v.CurrentNodeId is not int cur) return "—";
+        var idx = v.RouteNodeIds.IndexOf(cur);
+        var next = idx >= 0 && idx + 1 < v.RouteNodeIds.Count
+            ? v.RouteNodeIds[idx + 1] : (int?)null;
+        if (next is null) return "—";
+
+        var cm = v.DistanceSinceLastNodeCm;
+        var dist = cm < 100m ? $"{cm:F0} cm" : $"{cm / 100m:F2} m";
+        return $"+{dist} → {next}";
+    }
+
+    private static string LoadClass(bool loaded) => loaded ? "has-load" : "";
 
     private static string GetStateClass(string state) => state switch
     {
