@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -38,7 +38,8 @@ namespace AGV.Simulation.Services
     /// fleet manager consumes. This keeps the simulation layer
     /// cleanly separated from the host dispatch logic.
     /// </summary>
-    public sealed class SimulationEngineService : BackgroundService
+    public sealed class SimulationEngineService
+        : BackgroundService, AGV.Core.Interfaces.ISimulationControl
     {
         private readonly SimulatedVehicleAdapter _adapter;
         private readonly SimulationOptions _options;
@@ -87,6 +88,9 @@ namespace AGV.Simulation.Services
 
         /// <summary>Total ticks executed.</summary>
         public long TickCount => _tickCount;
+
+        /// <summary>True while press-demand mission generation is on.</summary>
+        public bool PressDemandEnabled => _options.EnablePressDemand;
 
         /// <summary>Current simulation speed factor.</summary>
         public decimal SpeedFactor

@@ -294,6 +294,7 @@ try
             sp.GetRequiredService<VehicleRegistry>(),
             sp.GetRequiredService<ActiveMissionRegistry>(),
             sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>()));
+    builder.Services.AddSingleton<AGV.Dashboard.Services.DeadlockTestService>();
     builder.Services.AddHostedService(sp =>
         sp.GetRequiredService<AGV.Dashboard.Services.DashboardBroadcaster>());
 
@@ -352,6 +353,12 @@ try
         builder.Services.AddSingleton<SimulatedVehicleAdapter>();
         builder.Services.AddSingleton<IVehicleAdapter>(sp =>
             sp.GetRequiredService<SimulatedVehicleAdapter>());
+
+        builder.Services.AddSingleton<AGV.Core.Interfaces.ISimulationTestHooks>(
+            sp => sp.GetRequiredService<SimulatedVehicleAdapter>());
+        builder.Services.AddSingleton<AGV.Core.Interfaces.ISimulationControl>(
+            sp => sp.GetRequiredService<SimulationEngineService>());
+
 
         builder.Services.AddSingleton<SimulationEngineService>();
         builder.Services.AddHostedService(sp =>

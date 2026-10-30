@@ -796,30 +796,47 @@
     document.addEventListener('click', function (e) {
         const target = e.target;
 
-        const group = target.closest('.vehicle-group');
+        let group = target.closest('.vehicle-group');
         if (group) {
+            // Vehicles can overlap (head-on on adjacent nodes). Collect every
+            // vehicle under the cursor; each click cycles to the next one.
+            const stack = [];
+            for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
+                const g = el.closest ? el.closest('.vehicle-group') : null;
+                if (g && stack.indexOf(g) < 0) stack.push(g);
+            }
+            if (stack.length > 1) {
+                const last = window.fleetMap._lastPickVid;
+                const li = stack.findIndex(g => parseInt(g.getAttribute('data-vid')) === last);
+                group = stack[(li + 1) % stack.length];
+            }
             const vid = parseInt(group.getAttribute('data-vid'));
-            const clickTime = performance.now();
-            console.log(`Vehicle clicked: ${vid} @ ${clickTime.toFixed(0)}ms`);
+            window.fleetMap._lastPickVid = vid;
             setTimeout(function () {
-                console.log(`  → setTimeout fired for V${vid} @ ${performance.now().toFixed(0)}ms (delay=${(performance.now() - clickTime).toFixed(0)}ms)`);
-                if (window.fleetMap._dotNetRef) {
-                    const invokeStart = performance.now();
-                    window.fleetMap._dotNetRef.invokeMethodAsync('OnVehicleClicked', vid)
-                        .then(() => console.log(`  → invokeMethodAsync resolved for V${vid} @ ${performance.now().toFixed(0)}ms (took ${(performance.now() - invokeStart).toFixed(0)}ms)`));
-                }
+                if (window.fleetMap._dotNetRef)
+                    window.fleetMap._dotNetRef.invokeMethodAsync('OnVehicleClicked', vid);
             }, 0);
             return;
         }
 
         const vc = target.closest('[data-vc]');
         if (vc && window.fleetMap._dotNetRef) {
-            const keep = document.getElementById('vc-keep');
-            const msg = document.getElementById('vc-msg');
+            const vcVid = parseInt(vc.getAttribute('data-vid'));
+            const keep = document.getElementById('vc-keep-' + vcVid);
+            const msg = document.getElementById('vc-msg-' + vcVid);
             window.fleetMap._dotNetRef.invokeMethodAsync('VehicleControlJs',
                 vc.getAttribute('data-vc'),
-                parseInt(vc.getAttribute('data-vid')),
+                vcVid,
                 !!(keep && keep.checked))
+                .then(t => { if (msg && t) msg.textContent = t; });
+            return;
+        }
+
+        const ts = target.closest('[data-ts]');
+        if (ts && window.fleetMap._dotNetRef) {
+            const msg = document.getElementById('ts-msg');
+            window.fleetMap._dotNetRef.invokeMethodAsync('TestActionJs',
+                ts.getAttribute('data-ts'), ts.getAttribute('data-name') || '')
                 .then(t => { if (msg && t) msg.textContent = t; });
             return;
         }
@@ -870,9 +887,10 @@
         }
 
         if (target.classList.contains('popup-close')) {
+            const pid = parseInt(target.getAttribute('data-pid'));
             setTimeout(async function () {
                 if (window.fleetMap._dotNetRef)
-                    await window.fleetMap._dotNetRef.invokeMethodAsync('ClosePopup');
+                    await window.fleetMap._dotNetRef.invokeMethodAsync('ClosePopup', pid);
             }, 0);
             return;
         }
@@ -882,8 +900,11 @@
     // Floating panels: drag by title, remember position, bring to front
     // ----------------------------------------------------------------
     (function () {
-        const SEL = '.vehicle-popup, .mission-board, .mission-builder, .scenario-dialog';
-        const saved = {};          // panel class -> last {left, top}
+        const SEL = '.vehicle-popup, .mission-board, .mission-builder, .scenario-dialog, .test-dialog';
+        const saved = {};          // panel key -> last {left, top}
+        // Vehicle popups are keyed per vehicle so several can sit side by side
+        const keyOf = el => el.getAttribute('data-pid')
+            ? 'vp' + el.getAttribute('data-pid') : el.classList[0];
         let topZ = 200;
         let drag = null;
 
@@ -901,8 +922,13 @@
             for (const m of muts) {
                 for (const n of m.addedNodes) {
                     if (n.nodeType !== 1 || !n.matches || !n.matches(SEL)) continue;
-                    const p = saved[n.classList[0]];
+                    const p = saved[keyOf(n)];
                     if (p) place(n, p.left, p.top);
+                    else if (n.classList.contains('vehicle-popup')) {
+                        // cascade a new popup so it does not cover the others
+                        const idx = document.querySelectorAll('.vehicle-popup').length - 1;
+                        if (idx > 0) place(n, n.offsetLeft + idx * 30, n.offsetTop + idx * 30);
+                    }
                     n.style.zIndex = ++topZ;
                 }
             }
@@ -927,7 +953,7 @@
 
         document.addEventListener('mouseup', function () {
             if (!drag) return;
-            saved[drag.panel.classList[0]] =
+            saved[keyOf(drag.panel)] =
                 { left: drag.panel.offsetLeft, top: drag.panel.offsetTop };
             drag = null;
         });

@@ -32,7 +32,7 @@ namespace AGV.Simulation.Services
     ///   appsettings.json: "VehicleInterface": "Mqtt"
     ///   → AGV.Host registers MqttVehicleAdapter as IVehicleAdapter
     /// </summary>
-    public sealed class SimulatedVehicleAdapter : IVehicleAdapter
+    public sealed class SimulatedVehicleAdapter : IVehicleAdapter, ISimulationTestHooks
     {
         private readonly VehicleRegistry _registry;
         private readonly ChannelRegistry _channels;
@@ -434,8 +434,9 @@ namespace AGV.Simulation.Services
 
                 // Transition based on current activity
                 var currentActivity = state.StateMachine.Activity;
-                if (currentActivity == ActivityState.TravelingToPickup
-                    || currentActivity == ActivityState.ApproachingStand)
+                if (!state.TestMode
+                    && (currentActivity == ActivityState.TravelingToPickup
+                        || currentActivity == ActivityState.ApproachingStand))
                 {
                     // TravelingToPickup must pass through ApproachingStand first
                     if (currentActivity == ActivityState.TravelingToPickup)
@@ -445,10 +446,11 @@ namespace AGV.Simulation.Services
                         ActivityState.Picking);
                     state.ForkOperationTimer = 0m;
                 }
-                else if (currentActivity ==
-                    ActivityState.TravelingLoaded
-                    || currentActivity ==
-                    ActivityState.ApproachingDrop)
+                else if (!state.TestMode
+                    && (currentActivity ==
+                        ActivityState.TravelingLoaded
+                        || currentActivity ==
+                        ActivityState.ApproachingDrop))
                 {
                     if (currentActivity == ActivityState.TravelingLoaded)
                         state.StateMachine.TryTransition(ActivityState.ApproachingDrop);
@@ -637,6 +639,50 @@ namespace AGV.Simulation.Services
         // Helpers
         // ----------------------------------------------------------------
 
+        // ----------------------------------------------------------------
+        // ISimulationTestHooks (dev-only test harness)
+        // ----------------------------------------------------------------
+
+        public async Task PlaceVehicleAsync(
+            int vehicleId,
+            int nodeId,
+            bool testMode,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_simStates.TryGetValue(vehicleId, out var state)) return;
+
+            state.PendingOrder = null;
+            state.CurrentOrderId = string.Empty;
+            state.NodeIndex = 0;
+            state.TravelProgress = 0;
+            state.ForkOperationTimer = 0m;
+            state.IsPaused = false;
+            state.IsWaitingForTrigger = false;
+            state.TestMode = testMode;
+
+            state.StateMachine.ForceTransition(
+                ActivityState.Idle, "test placement");
+            state.StateMachine.SetOrderState(OrderState.Idle);
+
+            state.CurrentNodeId = nodeId;
+            var node = RoadMap.GetNode(nodeId);
+            if (node is not null)
+            {
+                state.CurrentX = node.Position.X;
+                state.CurrentY = node.Position.Y;
+            }
+
+            await PublishStateUpdateAsync(state, cancellationToken);
+        }
+
+        public bool IsVehicleAtRest(int vehicleId)
+            => _simStates.TryGetValue(vehicleId, out var state)
+               && state.PendingOrder is null;
+
+        public int GetVehicleNodeId(int vehicleId)
+            => _simStates.TryGetValue(vehicleId, out var state)
+                ? state.CurrentNodeId : 0;
+
         private SimulatedVehicleState? GetSimStateBySerial(
             string serialNumber)
         {
@@ -686,6 +732,10 @@ namespace AGV.Simulation.Services
 
         // Fork operation timing
         public decimal ForkOperationTimer { get; set; }  // seconds
+
+        // Test harness: the vehicle goes idle at the end of an order
+        // instead of starting pick/drop handling
+        public bool TestMode { get; set; }
 
         // startPause / stopPause: vehicle holds position and keeps its
         // state (manual mode, out of service)

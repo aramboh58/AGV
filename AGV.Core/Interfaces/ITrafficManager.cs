@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -66,6 +66,16 @@ namespace AGV.Core.Interfaces
             CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Locks a single node for a vehicle without locking a move: the
+        /// node the vehicle is standing on. Used by the test harness to
+        /// start a vehicle in the state it would be in after arriving.
+        /// </summary>
+        Task HoldNodeAsync(
+            int vehicleId,
+            int nodeId,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Releases resource locks held by a vehicle as it clears
         /// a node or move. Called continuously as the vehicle
         /// progresses along its route.
@@ -109,6 +119,18 @@ namespace AGV.Core.Interfaces
         /// Used during fault recovery to identify which locks to release.
         /// </summary>
         IReadOnlySet<int> GetVehicleLockedNodeIds(int vehicleId);
+
+        /// <summary>
+        /// Returns the MoveIds currently locked by a specific vehicle.
+        /// </summary>
+        IReadOnlySet<int> GetVehicleLockedMoveIds(int vehicleId);
+
+        /// <summary>
+        /// Forgets the nodes a vehicle was recorded as waiting on, without
+        /// touching its locks. Called after the vehicle is re-routed so
+        /// its old wait no longer counts toward deadlock detection.
+        /// </summary>
+        void ClearContentions(int vehicleId);
 
         /// <summary>
         /// Updates area occupancy when a vehicle enters or exits an area.

@@ -1061,3 +1061,55 @@ html, body {
 .vehicle-card.has-load {
     box-shadow: inset 0 0 0 1px #f59e0b;
 }
+
+/* Deadlock test panel (dev only) */
+.test-dialog {
+    pointer-events: all;
+    position: absolute;
+    top: 44px;
+    left: 12px;
+    width: 860px;
+    min-width: 520px;
+    max-height: calc(100% - 56px);
+    overflow-y: auto;
+    resize: both;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    padding: 10px;
+    z-index: 110;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+    .test-dialog .popup-title {
+        cursor: grab;
+    }
+
+.ts-block {
+    font-size: 11px;
+    color: var(--accent-yellow);
+    border: 1px solid var(--accent-yellow);
+    border-radius: 3px;
+    padding: 5px 8px;
+}
+
+.ts-pass {
+    color: var(--accent-green);
+    font-weight: 700;
+}
+
+.ts-fail {
+    color: var(--accent-red);
+    font-weight: 700;
+}
+
+.ts-running {
+    color: var(--accent-cyan);
+    font-weight: 700;
+}
+
+.ts-pending {
+    color: var(--text-dim);
+}

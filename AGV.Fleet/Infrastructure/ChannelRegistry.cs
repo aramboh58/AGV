@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -181,6 +181,25 @@ namespace AGV.Fleet.Infrastructure
                     SingleWriter = false
                 });
 
+        // ----------------------------------------------------------------
+        // Deadlock resolution channel
+        // Writer: TrafficManagerService (confirmed circular wait)
+        // Reader: FleetManagerService (re-routes one vehicle)
+        // ----------------------------------------------------------------
+
+        /// <summary>
+        /// A confirmed circular lock dependency. The fleet manager
+        /// re-routes one of the vehicles around the nodes the others hold.
+        /// </summary>
+        public Channel<DeadlockResolutionRequest> DeadlockRequests { get; }
+            = Channel.CreateBounded<DeadlockResolutionRequest>(
+                new BoundedChannelOptions(20)
+                {
+                    FullMode = BoundedChannelFullMode.DropOldest,
+                    SingleReader = true,
+                    SingleWriter = true
+                });
+
         public Channel<VehicleStateUpdate> DashboardStateUpdates { get; } =
             Channel.CreateUnbounded<VehicleStateUpdate>();
         public Channel<MissionCounterUpdate> MissionCounters { get; } =
@@ -191,6 +210,17 @@ namespace AGV.Fleet.Infrastructure
             Channel.CreateUnbounded<AlertUpdate>();
         public Channel<VehicleMissionUpdate> MissionUpdates { get; } =
             Channel.CreateUnbounded<VehicleMissionUpdate>();
+    }
+
+    /// <summary>
+    /// A confirmed circular wait: each vehicle waits on a node held by
+    /// the next one in the list (the last waits on the first).
+    /// </summary>
+    public sealed record DeadlockResolutionRequest
+    {
+        public IReadOnlyList<int> VehicleIds { get; init; }
+            = Array.Empty<int>();
+        public DateTime RequestedAt { get; init; } = DateTime.UtcNow;
     }
 
     /// <summary>

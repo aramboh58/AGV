@@ -44,4 +44,8 @@
     <ProjectReference Include="..\NYT.AGV.IO\NYT.AGV.IO.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="TestScenarios\" />
+  </ItemGroup>
+
 </Project>

@@ -1,0 +1,49 @@
+{
+  "name": "H3-ring2-plus-one-queued-unresolvable",
+  "description": "Spur pair (no bypass) plus a third vehicle queued behind - expect one alert, all stuck",
+  "expectedResolved": 0,
+  "expectedUnresolved": 1,
+  "timeoutSeconds": 60,
+  "speedFactor": 20,
+  "vehicles": [
+    {
+      "vehicleId": 1,
+      "route": [
+        2003,
+        5000,
+        5001
+      ],
+      "expectFinish": false
+    },
+    {
+      "vehicleId": 2,
+      "route": [
+        5000,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2055,
+        4533,
+        4534,
+        4535,
+        4536,
+        3563,
+        4028
+      ],
+      "expectFinish": false
+    },
+    {
+      "vehicleId": 3,
+      "route": [
+        2002,
+        2003,
+        5000,
+        5001
+      ],
+      "expectFinish": false
+    }
+  ]
+}

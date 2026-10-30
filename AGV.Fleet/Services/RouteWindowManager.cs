@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -186,6 +186,131 @@ namespace AGV.Fleet.Services
                 }
 
                 await ExtendAsync(it, forceSend: false, cancellationToken);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Where a vehicle's commanded route ends: the last node released
+        /// to it, plus the order's final destination.
+        /// </summary>
+        public readonly record struct CommitPoint(
+            int NodeId,
+            int ReleasedIndex,
+            int ReachedIndex,
+            int FinalNodeId,
+            string OrderId);
+
+        /// <summary>
+        /// The vehicle's commanded-to node (last node released to it) and
+        /// the order's destination. Null if it has no itinerary, or has
+        /// already been commanded all the way to the destination.
+        /// </summary>
+        public async Task<CommitPoint?> GetCommitPointAsync(
+            int vehicleId, CancellationToken cancellationToken)
+        {
+            if (!_itineraries.ContainsKey(vehicleId)) return null;
+
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                if (!_itineraries.TryGetValue(vehicleId, out var it))
+                    return null;
+                var last = it.Nodes.Count - 1;
+                if (it.ReleasedIndex >= last) return null;
+
+                return new CommitPoint(
+                    it.Nodes[it.ReleasedIndex], it.ReleasedIndex,
+                    it.ReachedIndex, it.Nodes[last], it.OrderId);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// The nodes from the last one the vehicle reached to the end of
+        /// its itinerary (empty if it has none).
+        /// </summary>
+        public async Task<List<int>> GetRemainingNodesAsync(
+            int vehicleId, CancellationToken cancellationToken)
+        {
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                return _itineraries.TryGetValue(vehicleId, out var it)
+                    ? it.Nodes.Skip(it.ReachedIndex).ToList()
+                    : new List<int>();
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Truncate-and-append at the commanded-to node: releases any
+        /// locks beyond it, replaces the rest of the itinerary with
+        /// newNodes (which must start at the commit point's node) and
+        /// sends an update of the same order. Everything up to the
+        /// commanded-to node is untouched, so the vehicle keeps driving.
+        /// Returns false if the itinerary changed since the commit point
+        /// was read (the caller retries).
+        /// </summary>
+        public async Task<bool> ReplaceTailAsync(
+            int vehicleId,
+            CommitPoint point,
+            IReadOnlyList<int> newNodes,
+            IEnumerable<int>? newMoves,
+            CancellationToken cancellationToken)
+        {
+            if (newNodes.Count < 2 || newNodes[0] != point.NodeId)
+                return false;
+
+            var nodeList = newNodes.ToList();
+            var tailMoves = ResolveMoves(nodeList, newMoves?.ToList());
+            if (tailMoves is null) return false;
+
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                if (!_itineraries.TryGetValue(vehicleId, out var it)
+                    || it.OrderId != point.OrderId
+                    || it.ReleasedIndex != point.ReleasedIndex)
+                    return false;
+
+                // Release only locks beyond the commanded-to node
+                for (var i = it.ReleasedIndex + 1; i <= it.LockedIndex; i++)
+                {
+                    await _traffic.ReleaseLocksAsync(
+                        vehicleId, it.Nodes[i], it.Moves[i - 1],
+                        cancellationToken);
+                }
+                it.LockedIndex = it.ReleasedIndex;
+
+                // Replace the unreleased tail
+                it.Nodes.RemoveRange(
+                    it.ReleasedIndex + 1,
+                    it.Nodes.Count - it.ReleasedIndex - 1);
+                it.Moves.RemoveRange(
+                    it.ReleasedIndex,
+                    it.Moves.Count - it.ReleasedIndex);
+                it.Nodes.AddRange(nodeList.Skip(1));
+                it.Moves.AddRange(tailMoves);
+                it.DeniedLogged = false;
+
+                _logger.LogInformation(
+                    "Route window: vehicle {VehicleId} order {OrderId} " +
+                    "tail replaced after node {NodeId} " +
+                    "({Nodes} nodes total)",
+                    vehicleId, it.OrderId, point.NodeId, it.Nodes.Count);
+
+                await ExtendAsync(it, forceSend: true, cancellationToken);
+                return true;
             }
             finally
             {

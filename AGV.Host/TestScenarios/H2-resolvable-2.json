@@ -1,0 +1,45 @@
+{
+  "name": "H2-resolvable-2",
+  "description": "2 vehicles head-on on 2759/7530; bypass exists",
+  "expectedResolved": 1,
+  "expectedUnresolved": 0,
+  "timeoutSeconds": 150,
+  "speedFactor": 20,
+  "vehicles": [
+    {
+      "vehicleId": 1,
+      "route": [
+        2759,
+        7530,
+        7533,
+        3565,
+        3566,
+        3567,
+        3568,
+        3569,
+        3570,
+        3571,
+        3572
+      ],
+      "expectFinish": true
+    },
+    {
+      "vehicleId": 2,
+      "route": [
+        7530,
+        2759,
+        2760,
+        2761,
+        2762,
+        2763,
+        7473,
+        3560,
+        3561,
+        3562,
+        3563,
+        4028
+      ],
+      "expectFinish": true
+    }
+  ]
+}

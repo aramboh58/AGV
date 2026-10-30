@@ -10,6 +10,7 @@
 @inject DashboardBroadcaster Broadcaster
 @inject MissionBoardService MissionBoard
 @inject ScenarioService Scenarios
+@inject DeadlockTestService Tests
 @inject IFleetManager Fleet
 @inject IJSRuntime JS
 @inject ILogger<Dashboard> Logger
@@ -63,6 +64,10 @@
                 <div class="panel-label panel-label-row">
                     <span>MISSIONS</span>
                     <span class="label-btns">
+                        @if (Tests.Enabled)
+                        {
+                            <button class="scenario-btn @(_tsOpen ? "queue-btn-on" : "")" data-ts="toggle">TEST</button>
+                        }
                         <button class="scenario-btn @(_scOpen ? "queue-btn-on" : "")" data-sc="toggle">SIM</button>
                         <button class="builder-btn @(_builderOpen ? "queue-btn-on" : "")">NEW</button>
                         <button class="queue-btn @(_boardOpen ? "queue-btn-on" : "")">QUEUE</button>
@@ -127,10 +132,10 @@
             }
         </aside>
 
-        @if (_selectedVehicle is not null)
+        @foreach (var _selectedVehicle in _popups)
         {
-            <div class="vehicle-popup">
-                <button class="popup-close">✕</button>
+            <div class="vehicle-popup" @key="_selectedVehicle.VehicleId" data-pid="@_selectedVehicle.VehicleId">
+                <button class="popup-close" data-pid="@_selectedVehicle.VehicleId">✕</button>
 
                 <div class="popup-title">F@(_selectedVehicle.VehicleId.ToString("D2"))</div>
                 <div class="popup-row">
@@ -197,10 +202,10 @@
                 @if (_selectedVehicle.Mode != "OutOfService")
                 {
                     <label class="vc-keep" title="Out of service normally releases the vehicle's locked nodes and moves. Tick to keep them held.">
-                        <input type="checkbox" id="vc-keep" /> Keep locked nodes &amp; moves
+                        <input type="checkbox" id="@KeepId(_selectedVehicle.VehicleId)" /> Keep locked nodes &amp; moves
                     </label>
                 }
-                <div id="vc-msg" class="builder-msg"></div>
+                <div id="@MsgId(_selectedVehicle.VehicleId)" class="builder-msg"></div>
 
                 <div class="popup-section-label">ROUTE</div>
                 <div class="popup-route">
@@ -273,6 +278,50 @@
             </div>
         }
 
+
+        @if (_tsOpen && Tests.Enabled)
+        {
+            var tsBlock = Tests.Blocker();
+            <div class="test-dialog">
+                <button class="builder-close" data-ts="close">✕</button>
+                <div class="popup-title">DEADLOCK TESTS <span class="sc-tag">DEV ONLY</span></div>
+                @if (tsBlock is not null)
+                {
+                    <div class="ts-block">@tsBlock</div>
+                }
+                <div class="sc-toolbar">
+                    <button class="sc-btn sc-run" data-ts="runall">▶ RUN ALL</button>
+                    <button class="sc-btn sc-stop" data-ts="stop">■ STOP</button>
+                    <button class="sc-btn" data-ts="reset">RESET</button>
+                    <span class="sc-runline">@(_tsRun?.Running == true ? "RUNNING" : "IDLE")</span>
+                </div>
+                <div id="ts-msg" class="builder-msg">@_tsRun?.Message</div>
+                <div class="sc-gridwrap">
+                    <table class="sc-grid">
+                        <thead>
+                            <tr><th>SCENARIO</th><th>VEH</th><th>EXPECT</th><th>RESULT</th><th>SEC</th><th>DETAIL</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @if (_tsRun is not null)
+                            {
+                                @foreach (var r in _tsRun.Rows)
+                                {
+                                    <tr title="@r.Description">
+                                        <td>@r.Name</td>
+                                        <td>@r.VehicleCount</td>
+                                        <td>@r.Expect</td>
+                                        <td class="@TsClass(r.Status)">@r.Status</td>
+                                        <td>@r.Seconds.ToString("F0")</td>
+                                        <td>@r.Detail</td>
+                                        <td><button class="sc-btn" data-ts="run" data-name="@r.Name">RUN</button></td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
 
         @if (_scOpen && _builderOptions is not null)
         {
@@ -510,10 +559,14 @@
             }
 
             var detail = Broadcaster.GetVehicleDetail(vehicleId);
-            if (detail is not null && _selectedVehicle?.VehicleId == vehicleId)
+            if (detail is not null)
             {
-                _selectedVehicle = detail;
-                StateHasChanged();
+                var pi = _popups.FindIndex(p => p.VehicleId == vehicleId);
+                if (pi >= 0)
+                {
+                    _popups[pi] = detail;
+                    StateHasChanged();
+                }
             }
             return msg;
         }
@@ -688,6 +741,113 @@
     }
 
     // ----------------------------------------------------------------
+    // Deadlock test harness (DEV ONLY). Logic lives in DeadlockTestService;
+    // buttons are wired by fleet-map.js ([data-ts] -> TestActionJs).
+    // ----------------------------------------------------------------
+    private bool _tsOpen;
+    private TestRunDto? _tsRun;
+    private System.Threading.CancellationTokenSource? _tsCts;
+
+    private static string TsClass(string status) => status switch
+    {
+        "PASS" => "ts-pass",
+        "FAIL" => "ts-fail",
+        "RUNNING" => "ts-running",
+        _ => "ts-pending",
+    };
+
+    [JSInvokable]
+    public Task<string> TestActionJs(string action, string name)
+    {
+        var msg = "";
+        try
+        {
+            switch (action)
+            {
+                case "toggle":
+                    if (_tsOpen) CloseTests(); else OpenTests();
+                    break;
+                case "close":
+                    CloseTests();
+                    break;
+                case "runall":
+                    msg = Tests.Run(null);
+                    break;
+                case "run":
+                    msg = Tests.Run(name);
+                    break;
+                case "stop":
+                    msg = Tests.Stop();
+                    break;
+                case "reset":
+                    msg = Tests.Reset();
+                    break;
+            }
+            _tsRun = Tests.GetRun();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "TestActionJs {Action} failed", action);
+            msg = $"Error: {ex.Message}";
+        }
+        StateHasChanged();
+        return Task.FromResult(msg);
+    }
+
+    private void OpenTests()
+    {
+        _tsRun = Tests.GetRun();
+        _tsOpen = true;
+        StopTestRefresh();
+        var cts = new System.Threading.CancellationTokenSource();
+        _tsCts = cts;
+        _ = RunTestRefreshAsync(cts.Token);
+    }
+
+    private void CloseTests()
+    {
+        StopTestRefresh();
+        _tsOpen = false;
+    }
+
+    private void StopTestRefresh()
+    {
+        var cts = System.Threading.Interlocked.Exchange(ref _tsCts, null);
+        if (cts is null) return;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        cts.Dispose();
+    }
+
+    private async Task RunTestRefreshAsync(System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new System.Threading.PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                try
+                {
+                    var snap = Tests.GetRun();
+                    SafeInvokeAsync(() =>
+                    {
+                        if (!ct.IsCancellationRequested)
+                        {
+                            _tsRun = snap;
+                            StateHasChanged();
+                        }
+                        return Task.CompletedTask;
+                    }, nameof(RunTestRefreshAsync));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogError(ex, "Test refresh tick failed");
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    // ----------------------------------------------------------------
     // Mission builder (#3). Controls are plain HTML read by fleet-map.js
     // (Blazor events are not used on this page); only the option lists
     // are rendered here.
@@ -852,7 +1012,11 @@
     private string _simTime = "00:00:00";
     private decimal _speedFactor = 60m;
 
-    private VehicleDetailDto? _selectedVehicle;
+    // One popup per clicked vehicle; each is closed on its own.
+    private readonly List<VehicleDetailDto> _popups = new();
+
+    private static string KeepId(int vehicleId) => $"vc-keep-{vehicleId}";
+    private static string MsgId(int vehicleId) => $"vc-msg-{vehicleId}";
 
     // #11b (9/28): the selected vehicle used to be ONE process-wide value
     // on DashboardBroadcaster, so a click in any browser changed the popup
@@ -1161,6 +1325,7 @@
         StopPopupRefresh();
         StopBoardRefresh();
         StopScenarioRefresh();
+        StopTestRefresh();
     }
 
     // ----------------------------------------------------------------
@@ -1194,18 +1359,19 @@
         var detail = Broadcaster.GetVehicleDetail(vehicleId);
         if (detail is not null)
         {
-            _selectedVehicle = detail;
-            StartPopupRefresh(vehicleId); // replaces any refresh for a previously clicked vehicle
+            var pi = _popups.FindIndex(p => p.VehicleId == vehicleId);
+            if (pi >= 0) _popups[pi] = detail; else _popups.Add(detail);
+            StartPopupRefresh();
             StateHasChanged();
         }
         return Task.CompletedTask;
     }
 
     [JSInvokable]
-    public Task ClosePopup()
+    public Task ClosePopup(int vehicleId)
     {
-        StopPopupRefresh();
-        _selectedVehicle = null;
+        _popups.RemoveAll(p => p.VehicleId == vehicleId);
+        if (_popups.Count == 0) StopPopupRefresh();
         StateHasChanged();
         return Task.CompletedTask;
     }
@@ -1217,12 +1383,12 @@
     // only while this circuit's popup is open.
     // ----------------------------------------------------------------
 
-    private void StartPopupRefresh(int vehicleId)
+    private void StartPopupRefresh()
     {
-        StopPopupRefresh();
+        if (_popupCts is not null) return;   // one loop serves every open popup
         var cts = new System.Threading.CancellationTokenSource();
         _popupCts = cts;
-        _ = RunPopupRefreshAsync(vehicleId, cts.Token);
+        _ = RunPopupRefreshAsync(cts.Token);
     }
 
     private void StopPopupRefresh()
@@ -1236,7 +1402,7 @@
     }
 
     private async Task RunPopupRefreshAsync(
-        int vehicleId, System.Threading.CancellationToken ct)
+        System.Threading.CancellationToken ct)
     {
         try
         {
@@ -1246,16 +1412,15 @@
             {
                 try
                 {
-                    var detail = Broadcaster.GetVehicleDetail(vehicleId);
-                    if (detail is null) continue;
-
                     SafeInvokeAsync(() =>
                     {
-                        // Skip if the popup was closed or switched to
-                        // another vehicle while this update was queued.
-                        if (!ct.IsCancellationRequested)
+                        if (!ct.IsCancellationRequested && _popups.Count > 0)
                         {
-                            _selectedVehicle = detail;
+                            for (var i = 0; i < _popups.Count; i++)
+                            {
+                                var d = Broadcaster.GetVehicleDetail(_popups[i].VehicleId);
+                                if (d is not null) _popups[i] = d;
+                            }
                             StateHasChanged();
                         }
                         return Task.CompletedTask;
@@ -1265,8 +1430,7 @@
                 {
                     // Log and keep going: one bad tick must not silently
                     // freeze the popup for the rest of its life.
-                    Logger.LogError(ex,
-                        "Popup refresh tick failed for V{VehicleId}", vehicleId);
+                    Logger.LogError(ex, "Popup refresh tick failed");
                 }
             }
         }

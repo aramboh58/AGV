@@ -261,6 +261,13 @@ namespace AGV.Core.Entities
         public void ClearPlannedRoute()
             => PlannedRouteNodeIds = Array.Empty<int>();
 
+        /// <summary>
+        /// Updates the planned route without touching mission or order
+        /// state (used when the route is changed in flight).
+        /// </summary>
+        public void SetPlannedRoute(IReadOnlyList<int> routeNodeIds)
+            => PlannedRouteNodeIds = routeNodeIds;
+
         /// <summary>Sets or clears manual mode.</summary>
         public void SetManual(bool manual) => IsManual = manual;
 

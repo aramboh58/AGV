@@ -120,9 +120,11 @@ namespace AGV.Fleet.Services
             var dispatchTask = RunDispatchLoopAsync(stoppingToken);
 
             var decisionTask = ConsumeDispatchDecisionsAsync(stoppingToken);
+            var deadlockTask = ConsumeDeadlockRequestsAsync(stoppingToken);
 
             await Task.WhenAll(stateTask, transferTask,
-                               swapTask, dispatchTask, decisionTask);
+                               swapTask, dispatchTask, decisionTask,
+                               deadlockTask);
 
             _logger.LogInformation("FleetManagerService stopped");
         }
@@ -391,6 +393,149 @@ namespace AGV.Fleet.Services
             {
                 await ProcessMissionTransferAsync(transfer, stoppingToken);
             }
+        }
+
+        // ----------------------------------------------------------------
+        // Deadlock resolution
+        // ----------------------------------------------------------------
+
+        // Last time an "unresolved" alert was raised, per cycle signature.
+        // Touched only by the deadlock consumer loop.
+        private readonly Dictionary<string, DateTime> _deadlockAlertedAt = new();
+
+        private async Task ConsumeDeadlockRequestsAsync(
+            CancellationToken stoppingToken)
+        {
+            await foreach (var request in
+                _channels.DeadlockRequests.Reader
+                    .ReadAllAsync(stoppingToken))
+            {
+                try
+                {
+                    await ResolveDeadlockAsync(request, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _dispatchLogger.LogError(ex,
+                        "Deadlock resolution failed for {Vehicles}",
+                        string.Join(",", request.VehicleIds));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Breaks a circular wait by re-routing one vehicle. The route is
+        /// planned from the vehicle's commanded-to node to the original
+        /// destination, avoiding every node and move held by other
+        /// vehicles. Locks beyond the commanded-to node are released and
+        /// the new path replaces the rest of the itinerary; the vehicle
+        /// keeps driving what it has already been commanded.
+        /// </summary>
+        private async Task ResolveDeadlockAsync(
+            DeadlockResolutionRequest request,
+            CancellationToken stoppingToken)
+        {
+            // Every vehicle in the cycle must have come to rest at the end
+            // of its commanded route. A vehicle still driving will release
+            // nodes as it goes, so the wait may clear by itself.
+            var points = new Dictionary<int, RouteWindowManager.CommitPoint>();
+            foreach (var id in request.VehicleIds)
+            {
+                var point = await _windows.GetCommitPointAsync(
+                    id, stoppingToken);
+                if (point is { } p) points[id] = p;
+            }
+
+            if (points.Count < request.VehicleIds.Count
+                || points.Values.Any(p => p.ReachedIndex < p.ReleasedIndex))
+                return;
+
+            // Victim order: fewest locks first
+            var candidates = request.VehicleIds
+                .OrderBy(id => _traffic.GetVehicleLockedNodeIds(id).Count)
+                .ThenByDescending(id => id)
+                .ToList();
+
+            foreach (var id in candidates)
+            {
+                var vehicle = _registry.GetById(id);
+                if (vehicle is null || !vehicle.IsInService
+                    || vehicle.IsManual)
+                    continue;
+
+                var point = points[id];
+
+                // Block what OTHER vehicles hold (and engineer blocks);
+                // the vehicle's own locks are not obstacles to itself.
+                var blockedNodes = new HashSet<int>(_traffic.GetLockedNodeIds());
+                blockedNodes.ExceptWith(_traffic.GetVehicleLockedNodeIds(id));
+                var blockedMoves = new HashSet<int>(_traffic.GetLockedMoveIds());
+                blockedMoves.ExceptWith(_traffic.GetVehicleLockedMoveIds(id));
+
+                var route = await _routing.FindRouteAsync(
+                    point.NodeId,
+                    point.FinalNodeId,
+                    id,
+                    blockedNodes,
+                    blockedMoves,
+                    stoppingToken);
+
+                if (route is null)
+                {
+                    _dispatchLogger.LogInformation(
+                        "Deadlock: no alternate route for vehicle {VehicleId} " +
+                        "from node {From} to {To}",
+                        id, point.NodeId, point.FinalNodeId);
+                    continue;
+                }
+
+                var nodeIds = route.Nodes.Select(n => n.NodeId).ToList();
+                if (!await _windows.ReplaceTailAsync(
+                        id, point, nodeIds, route.MoveIds, stoppingToken))
+                    return; // itinerary moved on; the request is retried
+
+                _traffic.ClearContentions(id);
+                DeadlockMetrics.RecordResolved();
+
+                // Show the new route on the dashboard
+                var remaining = await _windows.GetRemainingNodesAsync(
+                    id, stoppingToken);
+                vehicle.SetPlannedRoute(remaining.AsReadOnly());
+                await _channels.MissionUpdates.Writer.WriteAsync(
+                    new VehicleMissionUpdate(
+                        id, vehicle.CurrentMissionId, remaining),
+                    stoppingToken);
+
+                _dispatchLogger.LogWarning(
+                    "Deadlock resolved: vehicle {VehicleId} re-routed from " +
+                    "node {From} to {To} ({Hops} hops) around nodes held " +
+                    "by {Cycle}",
+                    id, point.NodeId, point.FinalNodeId, nodeIds.Count,
+                    string.Join(",", request.VehicleIds));
+                return;
+            }
+
+            // Nobody could be re-routed: tell the operator (not too often)
+            var signature = string.Join(",",
+                request.VehicleIds.OrderBy(v => v));
+            if (_deadlockAlertedAt.TryGetValue(signature, out var alertedAt)
+                && DateTime.UtcNow - alertedAt < TimeSpan.FromSeconds(60))
+                return;
+
+            _deadlockAlertedAt[signature] = DateTime.UtcNow;
+            DeadlockMetrics.RecordUnresolved();
+            _ = _channels.Alerts.Writer.TryWrite(
+                new AlertUpdate(
+                    AlertType.Deadlock,
+                    request.VehicleIds[0],
+                    "Deadlock unresolved: no alternate route for " +
+                    string.Join(", ", request.VehicleIds.Select(v => $"V{v}")) +
+                    " — operator intervention required",
+                    DateTime.UtcNow));
         }
 
         private async Task ConsumeMissionSwapsAsync(

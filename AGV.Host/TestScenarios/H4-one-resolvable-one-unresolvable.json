@@ -1,0 +1,87 @@
+{
+  "name": "H4-one-resolvable-one-unresolvable",
+  "description": "One resolvable pair and one unresolvable spur pair at the same time",
+  "expectedResolved": 1,
+  "expectedUnresolved": 1,
+  "timeoutSeconds": 150,
+  "speedFactor": 20,
+  "vehicles": [
+    {
+      "vehicleId": 1,
+      "route": [
+        2765,
+        7470,
+        7473,
+        3560,
+        3561,
+        3562,
+        3563,
+        3564,
+        3565,
+        3566,
+        4600
+      ],
+      "expectFinish": true
+    },
+    {
+      "vehicleId": 2,
+      "route": [
+        7470,
+        2765,
+        2766,
+        2767,
+        2768,
+        2769,
+        2770,
+        2771,
+        2772,
+        7400,
+        7403,
+        3553,
+        3554,
+        3555,
+        3556,
+        3557,
+        3558,
+        3559,
+        3560,
+        3561,
+        3562,
+        3563,
+        4028
+      ],
+      "expectFinish": true
+    },
+    {
+      "vehicleId": 3,
+      "route": [
+        2002,
+        9002,
+        9000,
+        9001
+      ],
+      "expectFinish": false
+    },
+    {
+      "vehicleId": 4,
+      "route": [
+        9002,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2055,
+        4533,
+        4534,
+        4535,
+        4536,
+        3563,
+        4028
+      ],
+      "expectFinish": false
+    }
+  ]
+}

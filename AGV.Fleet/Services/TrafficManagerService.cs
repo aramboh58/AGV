@@ -64,6 +64,15 @@ namespace AGV.Fleet.Services
         // Ghost filter threshold — confirm deadlock after N ticks
         private const int DeadlockConfirmTicks = 1;
 
+        // A deadlock that persists is re-submitted for resolution this often
+        private static readonly TimeSpan DeadlockRetryInterval =
+            TimeSpan.FromSeconds(5);
+
+        // Cycles already reported: signature (sorted vehicle ids) → last
+        // request time. Touched only by the deadlock evaluation loop.
+        private readonly Dictionary<string, DateTime>
+            _reportedDeadlocks = new();
+
         // Vehicle itinerary tracking
         // Key: vehicleId, Value: ordered list of planned node IDs
         private readonly Dictionary<int, List<int>>
@@ -210,6 +219,24 @@ namespace AGV.Fleet.Services
             return Task.CompletedTask;
         }
 
+        public Task HoldNodeAsync(
+            int vehicleId,
+            int nodeId,
+            CancellationToken cancellationToken = default)
+        {
+            _blockingState.BlockNode(nodeId, new NodeBlockRecord
+            {
+                LockedByVehicleId = vehicleId,
+                Reason = BlockReason.Unknown,
+            });
+
+            _lockLogger.LogDebug(
+                "Vehicle {VehicleId} holds node {NodeId}",
+                vehicleId, nodeId);
+
+            return Task.CompletedTask;
+        }
+
         // ----------------------------------------------------------------
         // ITrafficManager — Lock release (Phase 4: UNLOCK)
         // ----------------------------------------------------------------
@@ -292,6 +319,16 @@ namespace AGV.Fleet.Services
 
         public IReadOnlySet<int> GetVehicleLockedMoveIds(int vehicleId)
             => _blockingState.GetVehicleLockedMoveIds(vehicleId);
+
+        public void ClearContentions(int vehicleId)
+        {
+            lock (_trafficLock)
+            {
+                foreach (var key in _contentionTicks.Keys
+                    .Where(k => k.Item1 == vehicleId).ToList())
+                    _contentionTicks.Remove(key);
+            }
+        }
 
         /// <summary>
         /// The vehicle currently holding the lock on a node, or null if
@@ -463,44 +500,78 @@ namespace AGV.Fleet.Services
                     .ToList();
             }
 
-            if (sustained.Count < 2) return;
+            var cycles = sustained.Count >= 2
+                ? DetectCircularDependencies(sustained)
+                : new List<List<int>>();
 
-            // Check for circular dependency
-            var circular = DetectCircularDependency(sustained);
-            if (circular.Count > 0)
+            var now = DateTime.UtcNow;
+            var current = new HashSet<string>();
+
+            foreach (var cycle in cycles)
             {
-                _deadlockLogger.LogError(
-                    "DEADLOCK CONFIRMED: {VehicleCount} vehicles " +
-                    "in circular lock dependency: {Chain}",
-                    circular.Count,
-                    string.Join(" → ",
-                        circular.Select(v => $"V{v}")));
+                var signature = string.Join(",", cycle.OrderBy(v => v));
+                current.Add(signature);
 
-                // Trigger forensic flush
-                _ = _channels.ForensicFlushRequests.Writer.TryWrite(
-                    new ForensicFlushRequest
-                    {
-                        TriggerEvent = "DeadlockConfirmed",
-                        PrimaryVehicleId = circular[0],
-                        InvolvedVehicleIds = circular,
-                    });
+                var chain = string.Join(" → ", cycle.Select(v => $"V{v}"));
 
-                _ = _channels.Alerts.Writer.TryWrite(
-                    new AlertUpdate(
-                        AlertType.Deadlock,
-                        circular[0],
-                        $"Deadlock detected: {string.Join(" → ", circular.Select(v => $"V{v}"))}",
-                        DateTime.UtcNow));
+                if (!_reportedDeadlocks.TryGetValue(signature, out var last))
+                {
+                    // First sighting: report once
+                    _deadlockLogger.LogError(
+                        "DEADLOCK CONFIRMED: {VehicleCount} vehicles " +
+                        "in circular lock dependency: {Chain}",
+                        cycle.Count, chain);
 
-                // Resolve via escape node detour
-                ResolveDeadlock(circular, cancellationToken);
+                    _ = _channels.ForensicFlushRequests.Writer.TryWrite(
+                        new ForensicFlushRequest
+                        {
+                            TriggerEvent = "DeadlockConfirmed",
+                            PrimaryVehicleId = cycle[0],
+                            InvolvedVehicleIds = cycle,
+                        });
+
+                    _ = _channels.Alerts.Writer.TryWrite(
+                        new AlertUpdate(
+                            AlertType.Deadlock,
+                            cycle[0],
+                            $"Deadlock detected: {chain}",
+                            now));
+
+                    _reportedDeadlocks[signature] = now;
+                    DeadlockMetrics.RecordDetected();
+                    RequestResolution(cycle);
+                }
+                else if (now - last >= DeadlockRetryInterval)
+                {
+                    // Still deadlocked: ask again (quietly)
+                    _deadlockLogger.LogWarning(
+                        "Deadlock persists: {Chain} — retrying resolution",
+                        chain);
+                    _reportedDeadlocks[signature] = now;
+                    RequestResolution(cycle);
+                }
+            }
+
+            // Forget cycles that no longer exist
+            foreach (var signature in _reportedDeadlocks.Keys
+                .Where(k => !current.Contains(k)).ToList())
+            {
+                _reportedDeadlocks.Remove(signature);
+                _deadlockLogger.LogInformation(
+                    "Deadlock cleared: vehicles {Vehicles}", signature);
             }
         }
 
-        private List<int> DetectCircularDependency(
+        /// <summary>
+        /// Finds every circular wait. Each vehicle waits on at most one
+        /// holder, so the wait-for graph has out-degree 1 and a cycle is
+        /// found by following the chain until a vehicle repeats. Only the
+        /// vehicles in the cycle are returned, not those queued behind it.
+        /// </summary>
+        private List<List<int>> DetectCircularDependencies(
             List<(int waiting, int wanted, int ticks)> contentions)
         {
-            // Build wait-for graph: vehicleA waits for node held by vehicleB
+            // Wait-for graph: vehicleA waits for a node held by vehicleB
             var waitFor = new Dictionary<int, int>();
 
             foreach (var (waiting, wanted, _) in contentions)
@@ -513,93 +584,44 @@ namespace AGV.Fleet.Services
                 }
             }
 
-            // Detect cycles using DFS
-            var visited = new HashSet<int>();
-            var inStack = new HashSet<int>();
-            var cycle = new List<int>();
+            var cycles = new List<List<int>>();
+            var done = new HashSet<int>();
 
             foreach (var start in waitFor.Keys)
             {
-                if (FindCycle(start, waitFor, visited, inStack, cycle))
-                    return cycle;
-            }
+                if (done.Contains(start)) continue;
 
-            return new List<int>();
-        }
+                var path = new List<int>();
+                var position = new Dictionary<int, int>();
+                var current = start;
 
-        private static bool FindCycle(
-            int node,
-            Dictionary<int, int> graph,
-            HashSet<int> visited,
-            HashSet<int> inStack,
-            List<int> cycle)
-        {
-            if (inStack.Contains(node))
-            {
-                cycle.Add(node);
-                return true;
-            }
-            if (visited.Contains(node)) return false;
-
-            visited.Add(node);
-            inStack.Add(node);
-
-            if (graph.TryGetValue(node, out var next))
-            {
-                if (FindCycle(next, graph, visited, inStack, cycle))
+                while (!done.Contains(current))
                 {
-                    if (!cycle.Contains(node))
-                        cycle.Add(node);
-                    return true;
-                }
-            }
-
-            inStack.Remove(node);
-            return false;
-        }
-
-        private void ResolveDeadlock(
-            List<int> involvedVehicles,
-            CancellationToken cancellationToken)
-        {
-            // Select vehicle with lowest detour cost (most opportune)
-            // For Phase 1: select the vehicle with fewest locked nodes
-            var candidate = involvedVehicles
-                .OrderBy(v => _blockingState
-                    .GetVehicleLockedNodeIds(v).Count)
-                .FirstOrDefault();
-
-            if (candidate == 0) return;
-
-            _deadlockLogger.LogWarning(
-                "Deadlock resolution: directing vehicle {VehicleId} " +
-                "to escape node (Phase 1 stub — escape node " +
-                "selection implemented in Phase 2)",
-                candidate);
-
-            // Phase 1 stub — escape node routing implemented
-            // when escape node table is populated at map load
-            // For now: trigger a mission transfer to re-route
-            _ = _channels.MissionTransfers.Writer.TryWrite(
-                new MissionTransfer
-                {
-                    FromVehicleId = candidate,
-                    ToVehicleId = null,
-                    Reason = TransferReason.VehicleFault,
-                    ReturnToQueue = true,
-                    EscalatedPriority = 0,
-                    FaultedAtNodeId = _blockingState
-                        .GetVehicleLockedNodeIds(candidate)
-                        .FirstOrDefault(),
-                    FaultedVehicleIsOnline = _registry
-                        .GetById(candidate)?.IsOnline ?? false,
-                    MissionContext = new MissionContext
+                    if (position.TryGetValue(current, out var at))
                     {
-                        MissionId = 0,
-                        CurrentOrderId = string.Empty,
-                        Priority = MissionPriority.Emergency,
+                        cycles.Add(path.GetRange(at, path.Count - at));
+                        break;
                     }
-                });
+
+                    position[current] = path.Count;
+                    path.Add(current);
+
+                    if (!waitFor.TryGetValue(current, out var next)) break;
+                    current = next;
+                }
+
+                foreach (var v in path) done.Add(v);
+            }
+
+            return cycles;
+        }
+
+        private void RequestResolution(List<int> cycle)
+        {
+            // The fleet manager owns routing: it re-routes one vehicle
+            // around the nodes the others hold.
+            _ = _channels.DeadlockRequests.Writer.TryWrite(
+                new DeadlockResolutionRequest { VehicleIds = cycle });
         }
 
         // ----------------------------------------------------------------
