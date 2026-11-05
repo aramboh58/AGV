@@ -586,6 +586,93 @@ namespace AGV.Fleet.Services
                 }
             }
         }
+        // No-route diagnostics: say WHY, and at most once per mission+vehicle
+        // every 30 s (this used to log every candidate on every 5 s pass).
+        private readonly ConcurrentDictionary<(int Mission, int Vehicle), DateTime>
+            _noRouteLoggedAt = new();
+
+        private async Task LogNoRouteAsync(
+            Vehicle vehicle, int missionId, int targetNodeId,
+            IReadOnlySet<int> blockedNodes, CancellationToken ct)
+        {
+            var key = (missionId, vehicle.VehicleId);
+            var now = DateTime.UtcNow;
+            if (_noRouteLoggedAt.TryGetValue(key, out var last)
+                && (now - last).TotalSeconds < 30)
+                return;
+            _noRouteLoggedAt[key] = now;
+
+            string why;
+            try
+            {
+                // Route ignoring all locks: does one exist at all?
+                var free = await _routing.FindRouteAsync(
+                    vehicle.CurrentNodeId ?? 0, targetNodeId, vehicle.VehicleId,
+                    new HashSet<int>(), new HashSet<int>(), ct);
+
+                if (free is null)
+                {
+                    why = "no route exists even with no locks (topology / stop-node rules)";
+                }
+                else
+                {
+                    var holders = free.Nodes
+                        .Select(n => n.NodeId)
+                        .Where(blockedNodes.Contains)
+                        .Select(n =>
+                        {
+                            var by = StaticLockHolders(vehicle.VehicleId)
+                                .Select(id => _registry.GetById(id)!)
+                                .Where(v => _traffic.GetVehicleLockedNodeIds(v.VehicleId).Contains(n))
+                                .Select(v => "F" + v.VehicleId.ToString("D2"))
+                                .FirstOrDefault() ?? "?";
+                            return $"{n}({by})";
+                        })
+                        .Distinct()
+                        .Take(8);
+                    why = "blocked by out-of-service/manual vehicle locks on the unobstructed route: "
+                        + string.Join(" ", holders);
+                }
+            }
+            catch (Exception ex)
+            {
+                why = "diagnostic failed: " + ex.Message;
+            }
+
+            _dispatchLogger.LogWarning(
+                "No route found for vehicle {VehicleId} from node {From} to mission " +
+                "{MissionId} target {NodeId} — {Why}",
+                vehicle.VehicleId, vehicle.CurrentNodeId, missionId, targetNodeId, why);
+        }
+
+        // Route PLANNING treats only locks that will not clear by themselves
+        // as obstacles: those held by vehicles that are out of service or in
+        // manual. Locks of in-service vehicles are transient (taken and
+        // released as they move); the route window / clearance check makes
+        // a vehicle wait for them at run time.
+        private IEnumerable<int> StaticLockHolders(int exceptVehicleId)
+            => _registry.GetAll()
+                .Where(v => v.VehicleId != exceptVehicleId
+                            && (!v.IsInService || v.IsManual))
+                .Select(v => v.VehicleId)
+                .ToList();
+
+        private HashSet<int> BlockedNodesFor(int vehicleId)
+        {
+            var s = new HashSet<int>();
+            foreach (var id in StaticLockHolders(vehicleId))
+                s.UnionWith(_traffic.GetVehicleLockedNodeIds(id));
+            return s;
+        }
+
+        private HashSet<int> BlockedMovesFor(int vehicleId)
+        {
+            var s = new HashSet<int>();
+            foreach (var id in StaticLockHolders(vehicleId))
+                s.UnionWith(_traffic.GetVehicleLockedMoveIds(id));
+            return s;
+        }
+
         private async Task TryDispatchPendingMissionsAsync(
             CancellationToken stoppingToken)
         {
@@ -597,28 +684,25 @@ namespace AGV.Fleet.Services
                 var candidates = SelectCandidateVehicles(mission);
                 if (candidates.Count == 0) break;
 
-                var blockedNodes = _traffic.GetLockedNodeIds();
-                var blockedMoves = _traffic.GetLockedMoveIds();
-
                 bool dispatched = false;
                 foreach (var vehicle in candidates)
                 {
+                    // A vehicle's own locks (the node it stands on) are not
+                    // obstacles to its own route.
+                    var ownBlockedNodes = BlockedNodesFor(vehicle.VehicleId);
                     var route = await _routing.FindRouteAsync(
                         vehicle.CurrentNodeId ?? 0,
                         mission.PickupNodeId,
                         vehicle.VehicleId,
-                        blockedNodes,
-                        blockedMoves,
+                        ownBlockedNodes,
+                        BlockedMovesFor(vehicle.VehicleId),
                         stoppingToken);
 
                     if (route is null)
                     {
-                        _dispatchLogger.LogWarning(
-                            "No route found for vehicle {VehicleId} " +
-                            "to mission {MissionId} pickup {NodeId} — trying next candidate",
-                            vehicle.VehicleId,
-                            mission.MissionId,
-                            mission.PickupNodeId);
+                        await LogNoRouteAsync(
+                            vehicle, mission.MissionId, mission.PickupNodeId,
+                            ownBlockedNodes, stoppingToken);
                         continue;
                     }
 
@@ -830,8 +914,8 @@ namespace AGV.Fleet.Services
                 vehicle.CurrentNodeId ?? 0,
                 mission.DropNodeId,
                 vehicle.VehicleId,
-                _traffic.GetLockedNodeIds(),
-                _traffic.GetLockedMoveIds(),
+                BlockedNodesFor(vehicle.VehicleId),
+                BlockedMovesFor(vehicle.VehicleId),
                 stoppingToken);
 
             if (route is null)
@@ -916,8 +1000,8 @@ namespace AGV.Fleet.Services
                 vehicle.CurrentNodeId ?? 0,
                 mission.PickupNodeId,
                 vehicle.VehicleId,
-                _traffic.GetLockedNodeIds(),
-                _traffic.GetLockedMoveIds(),
+                BlockedNodesFor(vehicle.VehicleId),
+                BlockedMovesFor(vehicle.VehicleId),
                 stoppingToken);
 
             if (route is null)

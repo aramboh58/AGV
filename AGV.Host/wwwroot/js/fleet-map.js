@@ -484,21 +484,20 @@
         const v = vehicles[vehicleId];
         if (!v) return;
 
-        // If dead-reckoning is active, use server position as sync correction
-        if (v.routeActive && nodeId) {
-            return;
-        }
+        // The server position is the truth: the dot follows it (no client
+        // dead reckoning), so a vehicle held on a lock or stopped stays
+        // where the server says it is.
 
         // Non-dead-reckoning path (idle, charging, etc.)
         let targetX, targetY;
         let targetHeading = heading !== undefined ? heading : v.currentHeading;
 
-        if (nodeId && nodePositions[parseInt(nodeId)]) {
-            targetX = nodePositions[parseInt(nodeId)].x;
-            targetY = nodePositions[parseInt(nodeId)].y;
-        } else if (x != null && y != null) {
+        if (x != null && y != null && isFinite(parseFloat(x)) && isFinite(parseFloat(y))) {
             targetX = toSvgX(parseFloat(x));
             targetY = toSvgY(parseFloat(y));
+        } else if (nodeId && nodePositions[parseInt(nodeId)]) {
+            targetX = nodePositions[parseInt(nodeId)].x;
+            targetY = nodePositions[parseInt(nodeId)].y;
         } else {
             return;
         }
@@ -513,13 +512,24 @@
             return;
         }
 
+        // Glide for slightly longer than the measured gap between this
+        // vehicle's updates, so the dot is still moving when the next one
+        // arrives (no stop-go between updates).
+        const nowMs = performance.now();
+        if (v.lastPosAt) {
+            const gap = Math.min(Math.max(nowMs - v.lastPosAt, 100), 2000);
+            v.posGap = v.posGap ? v.posGap * 0.7 + gap * 0.3 : gap;
+        }
+        v.lastPosAt = nowMs;
+        const glideMs = Math.min(Math.max((v.posGap || 500) * 1.2, 250), 2400);
+
         animTargets[vehicleId] = {
             targetX, targetY, targetHeading,
             startX: v.currentX,
             startY: v.currentY,
             startHeading: v.currentHeading,
-            startTime: performance.now(),
-            duration: 250
+            startTime: nowMs,
+            duration: glideMs
         };
 
         startAnimLoop();
@@ -641,7 +651,8 @@
             const firstPos = nodePositions[firstNodeId];
             v.routeNodeIds = routeNodeIds;
             v.routeIndex = 0;
-            v.routeActive = true;
+            v.routeActive = false;   // route kept for reference only; server positions move the dot
+            return;
             if (firstPos) {
                 const dx = v.currentX - firstPos.x;
                 const dy = v.currentY - firstPos.y;

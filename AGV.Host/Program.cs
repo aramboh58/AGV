@@ -519,14 +519,57 @@ try
         var pickupPattern =
             new System.Text.RegularExpressions.Regex(@"^LANE_\d+$");
 
-        var pressStandDrops = locationCatalog
+        // The router only accepts stop nodes and destination-only nodes as
+        // destinations. A location assigned to a NoStopNode node can never be
+        // routed to ("Destination node N is not a stop node"), so such
+        // locations are left out of press demand.
+        var roadmapPath = new[]
+            {
+                Path.Combine(app.Environment.WebRootPath ?? "", "nyt_agv_roadmap.json"),
+                Path.Combine(app.Environment.ContentRootPath, "wwwroot", "nyt_agv_roadmap.json"),
+                Path.Combine(AppContext.BaseDirectory, "nyt_agv_roadmap.json"),
+            }
+            .FirstOrDefault(File.Exists);
+
+        HashSet<int>? routableNodeIds = null;
+        if (roadmapPath is null)
+        {
+            Log.Warning(
+                "Press demand: nyt_agv_roadmap.json not found - NoStopNode filter skipped");
+        }
+        else
+        {
+            using var roadmapDoc = System.Text.Json.JsonDocument.Parse(
+                await File.ReadAllTextAsync(roadmapPath));
+            routableNodeIds = roadmapDoc.RootElement
+                .GetProperty("nodes").EnumerateArray()
+                .Where(n => n.GetProperty("nodeType").GetString() != "NoStopNode")
+                .Select(n => n.GetProperty("nodeId").GetInt32())
+                .ToHashSet();
+        }
+
+        var pressStandDropsAll = locationCatalog
             .GetEntries(AGV.Core.Enums.OperationType.Drop)
             .Where(e => pressStandPattern.IsMatch(e.LocationName))
             .ToList();
-        var pickupLocations = locationCatalog
+        var pickupLocationsAll = locationCatalog
             .GetEntries(AGV.Core.Enums.OperationType.Pick)
             .Where(e => pickupPattern.IsMatch(e.LocationName))
             .ToList();
+
+        var pressStandDrops = pressStandDropsAll
+            .Where(e => routableNodeIds is null || routableNodeIds.Contains(e.NodeId)).ToList();
+        var pickupLocations = pickupLocationsAll
+            .Where(e => routableNodeIds is null || routableNodeIds.Contains(e.NodeId)).ToList();
+
+        foreach (var e in pressStandDropsAll.Except(pressStandDrops))
+            Log.Warning(
+                "Press demand: drop location {Name} (node {NodeId}) is a NoStopNode - excluded",
+                e.LocationName, e.NodeId);
+        foreach (var e in pickupLocationsAll.Except(pickupLocations))
+            Log.Warning(
+                "Press demand: pick location {Name} (node {NodeId}) is a NoStopNode - excluded",
+                e.LocationName, e.NodeId);
 
         simOptions.PressStandNodeIds = pressStandDrops
             .Select(e => e.NodeId).Distinct().ToList();

@@ -338,17 +338,20 @@ namespace AGV.Dashboard.Services
 
                     if (finishedOk && (mustStay.Count == 0 || stable) && metricsOk)
                     {
-                        // Locks should drain once everyone is done
+                        // Everyone is done: the only locks left should be each
+                        // vehicle's own final node (it is standing there).
                         if (mustStay.Count == 0)
                         {
+                            var finals = vehicles.Select(x => x.Def.Route[^1]).ToHashSet();
+                            int Leftover() =>
+                                _traffic.GetLockedNodeIds().Count(n => !finals.Contains(n))
+                                + _traffic.GetLockedMoveIds().Count;
+
                             var drain = DateTime.UtcNow.AddSeconds(3);
-                            while ((_traffic.GetLockedNodeIds().Count > 0
-                                    || _traffic.GetLockedMoveIds().Count > 0)
-                                   && DateTime.UtcNow < drain)
+                            while (Leftover() > 0 && DateTime.UtcNow < drain)
                                 await Task.Delay(250, ct);
 
-                            var left = _traffic.GetLockedNodeIds().Count
-                                     + _traffic.GetLockedMoveIds().Count;
+                            var left = Leftover();
                             if (left > 0)
                             {
                                 SetRow(s.Name, "FAIL",

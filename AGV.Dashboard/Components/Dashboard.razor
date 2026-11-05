@@ -1146,7 +1146,11 @@
                     VehicleType = state.VehicleType,
                 };
             }
-            await JS.InvokeVoidAsync("fleetMap.updateStates", batch);
+            // JS interop is not available while the page is being
+            // prerendered (no circuit yet); _mapInitialized is only set by
+            // OnAfterRenderAsync in the live circuit.
+            if (_mapInitialized)
+                await JS.InvokeVoidAsync("fleetMap.updateStates", batch);
             StateHasChanged();
         }, nameof(HandleVehicleStatesUpdated));
     }
@@ -1155,7 +1159,8 @@
     {
         SafeInvokeAsync(async () =>
         {
-            await JS.InvokeVoidAsync("fleetMap.updatePositions", batch);
+            if (_mapInitialized)
+                await JS.InvokeVoidAsync("fleetMap.updatePositions", batch);
         }, nameof(HandleVehiclePositionsUpdated));
     }
 
@@ -1199,8 +1204,9 @@
     {
         SafeInvokeAsync(async () =>
         {
-            await JS.InvokeVoidAsync(
-                "fleetMap.setVehicleRoute", vehicleId, routeNodeIds.ToArray());
+            if (_mapInitialized)
+                await JS.InvokeVoidAsync(
+                    "fleetMap.setVehicleRoute", vehicleId, routeNodeIds.ToArray());
         }, nameof(HandleVehicleMissionUpdated));
     }
 

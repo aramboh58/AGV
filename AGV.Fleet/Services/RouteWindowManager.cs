@@ -47,8 +47,10 @@ namespace AGV.Fleet.Services
     ///                  from-node and move behind it are unlocked and the
     ///                  window slides forward.
     ///
-    /// A vehicle holds locks only while executing an order: on arrival at
-    /// the final node of the order all remaining locks are released.
+    /// On arrival at the final node of an order the vehicle releases the
+    /// move into it but KEEPS the lock on that node (it is standing there).
+    /// That lock is dropped when its next order moves it off the node, or
+    /// by ReleaseAllLocksAsync (fault, out of service, transfer).
     ///
     /// All operations are serialized through one gate so that
     /// check + lock is atomic across vehicles.
@@ -118,6 +120,29 @@ namespace AGV.Fleet.Services
                     await _traffic.ReleaseAllLocksAsync(
                         vehicleId, cancellationToken);
                 }
+                else
+                {
+                    // Idle vehicle: it still holds the node it stands on
+                    // (the new route's start). Drop any other stale lock.
+                    foreach (var held in _traffic
+                        .GetVehicleLockedNodeIds(vehicleId).ToList())
+                    {
+                        if (held != nodes[0])
+                            await _traffic.ReleaseLocksAsync(
+                                vehicleId, held, -1, cancellationToken);
+                    }
+                }
+
+                // The vehicle is standing on nodes[0]: make sure it holds
+                // that node, whatever happened to its locks before (never
+                // locked, dropped on return-to-service, replaced order).
+                // Skipped if another vehicle holds it (shared start node).
+                if (!_traffic.GetVehicleLockedNodeIds(vehicleId).Contains(nodes[0])
+                    && !_traffic.GetLockedNodeIds().Contains(nodes[0]))
+                {
+                    await _traffic.HoldNodeAsync(
+                        vehicleId, nodes[0], cancellationToken);
+                }
 
                 var itinerary = new Itinerary(
                     serialNumber, vehicleId, orderId, nodes, moves);
@@ -174,9 +199,13 @@ namespace AGV.Fleet.Services
 
                 if (it.ReachedIndex >= it.Nodes.Count - 1)
                 {
-                    // Arrived at the final node: release what remains.
+                    // Arrived at the final node: release the move into it
+                    // but KEEP the node lock - the vehicle is physically
+                    // standing there. (nodeId -1 releases the move only.)
+                    // The lock is dropped when the vehicle's next order
+                    // moves it off the node, or by ReleaseAllLocksAsync.
                     await _traffic.ReleaseLocksAsync(
-                        vehicleId, it.Nodes[^1], it.Moves[^1],
+                        vehicleId, -1, it.Moves[^1],
                         cancellationToken);
                     _itineraries.TryRemove(vehicleId, out _);
                     _logger.LogDebug(
