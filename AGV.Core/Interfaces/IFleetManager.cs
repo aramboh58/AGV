@@ -90,6 +90,16 @@ namespace AGV.Core.Interfaces
             CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Restarts an out-of-service vehicle on a node chosen by the
+        /// operator. Refused (Ok false, with the reason) if another
+        /// vehicle holds or stands on the node or the node does not exist.
+        /// </summary>
+        Task<(bool Ok, string Message)> RestartVehicleAsync(
+            int vehicleId,
+            int nodeId,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Puts a vehicle in or out of manual mode. A manual vehicle stops
         /// in place and keeps its mission, route and locked resources.
         /// Returns false if the request does not apply (unknown vehicle,

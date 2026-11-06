@@ -182,7 +182,12 @@
                 }
                 <div class="popup-section-label">CONTROL</div>
                 <div class="vc-buttons">
-                    @if (_selectedVehicle.Mode == "OutOfService")
+                    @if (_selectedVehicle.Mode == "OutOfService" && _selectedVehicle.LockedNodes.Count == 0)
+                    {
+                        <input type="text" class="vc-node" id="@NodeId(_selectedVehicle.VehicleId)" value="@RestartNodeText(_selectedVehicle)" title="Node to restart on" />
+                        <button class="vc-btn" data-vc="restart" data-vid="@_selectedVehicle.VehicleId">RESTART</button>
+                    }
+                    else if (_selectedVehicle.Mode == "OutOfService")
                     {
                         <button class="vc-btn" data-vc="return" data-vid="@_selectedVehicle.VehicleId">RETURN TO SERVICE</button>
                     }
@@ -526,7 +531,7 @@
     // ----------------------------------------------------------------
     [JSInvokable]
     public async Task<string> VehicleControlJs(
-        string action, int vehicleId, bool keepLocks)
+        string action, int vehicleId, bool keepLocks, string nodeText = "")
     {
         var name = $"F{vehicleId:D2}";
         try
@@ -553,6 +558,15 @@
                 case "return":
                     await Fleet.ReturnVehicleToServiceAsync(vehicleId);
                     msg = $"{name} returned to service.";
+                    break;
+                case "restart":
+                    if (!int.TryParse((nodeText ?? "").Trim(), out var restartNode))
+                    {
+                        msg = "Enter a valid restart node number.";
+                        break;
+                    }
+                    var restart = await Fleet.RestartVehicleAsync(vehicleId, restartNode);
+                    msg = restart.Ok ? $"{name} {restart.Message}" : restart.Message;
                     break;
                 default:
                     return "";
@@ -1016,6 +1030,9 @@
     private readonly List<VehicleDetailDto> _popups = new();
 
     private static string KeepId(int vehicleId) => $"vc-keep-{vehicleId}";
+    private static string NodeId(int vehicleId) => $"vc-node-{vehicleId}";
+    private static string RestartNodeText(VehicleDetailDto v)
+        => v.CurrentNodeId?.ToString() ?? "";
     private static string MsgId(int vehicleId) => $"vc-msg-{vehicleId}";
 
     // #11b (9/28): the selected vehicle used to be ONE process-wide value

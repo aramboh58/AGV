@@ -1113,3 +1113,16 @@ html, body {
 .ts-pending {
     color: var(--text-dim);
 }
+
+/* Restart node entry (out-of-service vehicle with released locks) */
+.vc-node {
+    width: 5.5em;
+    padding: 4px 6px;
+    margin-right: 6px;
+    background: #0b1220;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    border-radius: 3px;
+    font: inherit;
+    text-align: center;
+}

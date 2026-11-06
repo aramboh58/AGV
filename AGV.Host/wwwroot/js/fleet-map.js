@@ -835,10 +835,12 @@
             const vcVid = parseInt(vc.getAttribute('data-vid'));
             const keep = document.getElementById('vc-keep-' + vcVid);
             const msg = document.getElementById('vc-msg-' + vcVid);
+            const nodeEl = document.getElementById('vc-node-' + vcVid);
             window.fleetMap._dotNetRef.invokeMethodAsync('VehicleControlJs',
                 vc.getAttribute('data-vc'),
                 vcVid,
-                !!(keep && keep.checked))
+                !!(keep && keep.checked),
+                nodeEl ? nodeEl.value : '')
                 .then(t => { if (msg && t) msg.textContent = t; });
             return;
         }

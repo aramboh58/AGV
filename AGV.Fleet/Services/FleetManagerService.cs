@@ -48,6 +48,7 @@ namespace AGV.Fleet.Services
         private readonly IChargeQueueManager _charging;
         private readonly ICustomizationApi _customization;
         private readonly IVehicleAdapter _adapter;
+        private readonly RoadMapGraphHolder _graphHolder;
         private readonly ILogger _logger;
         private readonly ILogger _dispatchLogger;
 
@@ -88,6 +89,7 @@ namespace AGV.Fleet.Services
             IChargeQueueManager charging,
             ICustomizationApi customization,
             IVehicleAdapter adapter,
+            RoadMapGraphHolder graphHolder,
             ILoggerFactory loggerFactory)
         {
             _registry = registry;
@@ -100,6 +102,7 @@ namespace AGV.Fleet.Services
             _charging = charging;
             _customization = customization;
             _adapter = adapter;
+            _graphHolder = graphHolder;
             _logger = loggerFactory.CreateLogger(LogDomains.Fleet);
             _dispatchLogger = loggerFactory.CreateLogger(LogDomains.Dispatch);
         }
@@ -219,6 +222,116 @@ namespace AGV.Fleet.Services
             _logger.LogInformation(
                 "Vehicle {VehicleId} removed from service: {Reason}",
                 vehicleId, reason);
+        }
+
+        /// <summary>
+        /// Restarts an out-of-service vehicle on a node chosen by the
+        /// operator (used after its locks were released and it may have
+        /// been moved by hand). Fails, without changing anything, if
+        /// another vehicle holds or stands on that node. In the simulator
+        /// the vehicle is relocated to the node; a real vehicle is sent
+        /// an initPosition for it.
+        /// </summary>
+        public async Task<(bool Ok, string Message)> RestartVehicleAsync(
+            int vehicleId,
+            int nodeId,
+            CancellationToken cancellationToken = default)
+        {
+            var vehicle = _registry.GetById(vehicleId);
+            if (vehicle is null) return (false, "Unknown vehicle.");
+            if (vehicle.IsInService)
+                return (false, "Vehicle is already in service.");
+            if (nodeId <= 0) return (false, "Enter a restart node.");
+
+            foreach (var other in _registry.GetAll())
+            {
+                if (other.VehicleId == vehicleId) continue;
+                if (_traffic.GetVehicleLockedNodeIds(other.VehicleId)
+                        .Contains(nodeId)
+                    || other.CurrentNodeId == nodeId)
+                {
+                    var why = $"Restart refused: node {nodeId} is already " +
+                        $"held by vehicle F{other.VehicleId:D2}.";
+                    _logger.LogWarning(
+                        "Vehicle {VehicleId} restart on node {NodeId} " +
+                        "refused - held by vehicle {Other}",
+                        vehicleId, nodeId, other.VehicleId);
+                    return (false, why);
+                }
+            }
+
+            var relocated = false;
+            var node = _graphHolder.GetRequired().GetNode(nodeId);
+            if (node is null)
+                return (false, $"Restart refused: node {nodeId} does not exist.");
+
+            if (vehicle.CurrentNodeId != nodeId)
+            {
+                if (_adapter is ISimulationTestHooks hooks)
+                {
+                    // Simulator: relocate the simulated vehicle.
+                    await hooks.PlaceVehicleAsync(
+                        vehicleId, nodeId, false, cancellationToken,
+                        keepLoad: true);
+                    relocated = true;
+                }
+                else
+                {
+                    // Real vehicle: the operator has leashed it to this node
+                    // and chosen it; tell the vehicle where it is
+                    // (VDA 5050 initPosition) instead of waiting for it to
+                    // report the node itself.
+                    static ActionParameter P(string k, string v)
+                        => new() { Key = k, Value = v };
+                    var inv = System.Globalization.CultureInfo.InvariantCulture;
+                    await _adapter.SendInstantActionAsync(
+                        vehicle.SerialNumber,
+                        new VehicleInstantAction
+                        {
+                            HeaderId = Guid.NewGuid().ToString("N")[..8],
+                            InstantActions = new[]
+                            {
+                                new OrderAction
+                                {
+                                    ActionId = Guid.NewGuid().ToString("N")[..8],
+                                    ActionType = "initPosition",
+                                    BlockingType = "HARD",
+                                    Parameters = new[]
+                                    {
+                                        P("x", node.Position.X.ToString(inv)),
+                                        P("y", node.Position.Y.ToString(inv)),
+                                        P("theta", "0"),
+                                        P("mapId", vehicle.CurrentMapId),
+                                        P("lastNodeId", nodeId.ToString()),
+                                    },
+                                }
+                            },
+                        },
+                        cancellationToken);
+                    _logger.LogInformation(
+                        "Vehicle {VehicleId}: initPosition sent for node " +
+                        "{NodeId} (operator restart)", vehicleId, nodeId);
+                }
+                vehicle.UpdatePosition(nodeId, vehicle.CurrentMapId);
+            }
+
+            await ReturnVehicleToServiceAsync(vehicleId, cancellationToken);
+
+            // A relocated simulated vehicle has dropped its old order and
+            // reports Idle. Clear the in-flight order state to match, or
+            // the stale-idle guard in the state handler discards every
+            // report and the resumed route is never sent.
+            if (relocated && !vehicle.IsLoaded)
+                vehicle.UpdateState(ActivityState.Idle, OrderState.Idle);
+
+            if (!_traffic.GetLockedNodeIds().Contains(nodeId))
+                await _traffic.HoldNodeAsync(
+                    vehicleId, nodeId, cancellationToken);
+
+            _logger.LogInformation(
+                "Vehicle {VehicleId} restarted on node {NodeId}",
+                vehicleId, nodeId);
+            return (true, $"Restarted on node {nodeId}.");
         }
 
         public async Task ReturnVehicleToServiceAsync(

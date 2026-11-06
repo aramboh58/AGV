@@ -647,9 +647,12 @@ namespace AGV.Simulation.Services
             int vehicleId,
             int nodeId,
             bool testMode,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            bool keepLoad = false)
         {
             if (!_simStates.TryGetValue(vehicleId, out var state)) return;
+            if (RoadMap.GetNode(nodeId) is null) return;   // unknown node
+            var stayLoaded = keepLoad && state.StateMachine.IsLoaded;
 
             state.PendingOrder = null;
             state.CurrentOrderId = string.Empty;
@@ -660,8 +663,11 @@ namespace AGV.Simulation.Services
             state.IsWaitingForTrigger = false;
             state.TestMode = testMode;
 
+            // keepLoad (operator restart): a loaded vehicle stays loaded and
+            // waits for its drop leg, as it does right after a pick.
             state.StateMachine.ForceTransition(
-                ActivityState.Idle, "test placement");
+                stayLoaded ? ActivityState.TravelingLoaded : ActivityState.Idle,
+                "test placement");
             state.StateMachine.SetOrderState(OrderState.Idle);
 
             state.CurrentNodeId = nodeId;

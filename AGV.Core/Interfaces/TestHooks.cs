@@ -20,7 +20,8 @@ namespace AGV.Core.Interfaces
             int vehicleId,
             int nodeId,
             bool testMode,
-            CancellationToken cancellationToken = default);
+            CancellationToken cancellationToken = default,
+            bool keepLoad = false);
 
         /// <summary>True when the simulated vehicle has no order pending.</summary>
         bool IsVehicleAtRest(int vehicleId);
