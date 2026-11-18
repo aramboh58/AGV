@@ -1126,3 +1126,39 @@ html, body {
     font: inherit;
     text-align: center;
 }
+
+
+/* ── Simulation draft grid: row selection and inline edit ────────── */
+.sc-grid tbody tr[data-ridx] td {
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: default;
+}
+
+.sc-grid tbody tr.sc-sel td,
+.sc-grid tbody tr.sc-drag td {
+    background: #0a1929;
+}
+
+    .sc-grid tbody tr.sc-sel td:first-child,
+    .sc-grid tbody tr.sc-drag td:first-child {
+        box-shadow: inset 2px 0 0 var(--accent-cyan);
+    }
+
+.sc-grid tbody tr.sc-editrow td {
+    background: var(--bg-card);
+}
+
+.sc-grid .sc-editrow .builder-select {
+    width: 100%;
+    min-width: 0;
+}
+
+.sc-editbtns {
+    white-space: nowrap;
+}
+
+    .sc-editbtns .sc-btn {
+        padding: 2px 6px;
+    }
+

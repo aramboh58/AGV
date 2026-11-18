@@ -1,4 +1,4 @@
-@page "/"
+﻿@page "/"
 @using AGV.Core.Enums
 @using AGV.Core.Interfaces
 @using AGV.Core.Messages
@@ -334,7 +334,7 @@
             <div class="scenario-dialog">
                 <button class="builder-close" data-sc="close">✕</button>
                 <div class="popup-title">SIMULATION CHOREOGRAPHY <span class="sc-tag">SIMULATION / DEMO ONLY</span></div>
-                <div class="sc-note">T+ is local (wall-clock) time since RUN is pressed.</div>
+                <div class="sc-note">T+ is local (wall-clock) time since RUN is pressed. Click selects a row (Ctrl+click toggles, Shift+click or drag selects a range). Double-click, right-click or &#9998; edits a row.</div>
 
                 <div class="sc-toolbar">
                     <input id="sc-name" class="builder-select sc-name" placeholder="Simulation name" maxlength="64" />
@@ -376,6 +376,9 @@
                     <button class="sc-btn sc-run" data-sc="run">▶ RUN</button>
                     <button class="sc-btn sc-stop" data-sc="stop">■ STOP</button>
                     <button class="sc-btn" data-sc="clear">CLEAR</button>
+                    <button class="sc-btn" data-sc="dup" title="Append copies of the selected rows to the end of the list">DUPLICATE SELECTED</button>
+                    <span class="sc-note">T+ shift</span>
+                    <input id="sc-shift" class="builder-select sc-off" value="0:00" title="Added to each copy's T+ (mm:ss)" />
                     @if (showRun)
                     {
                         <span class="sc-runline">@_scRun!.Name · started @_scRun.StartedAt · T+ @FormatOffset(_scRun.ElapsedSeconds) · @(_scRun.Running ? "RUNNING" : "COMPLETE")</span>
@@ -412,18 +415,63 @@
                                 @for (var i = 0; i < _scDraft.Count; i++)
                                 {
                                     var m = _scDraft[i];
-                                    <tr>
-                                        <td>@(i + 1)</td>
-                                        <td>@FormatOffset(m.OffsetSeconds)</td>
-                                        <td>—</td>
-                                        <td>—</td>
-                                        <td>@m.PickLocation</td>
-                                        <td>@m.DropLocation</td>
-                                        <td>@m.Priority</td>
-                                        <td>—</td>
-                                        <td class="sc-status-pending">Draft</td>
-                                        <td><button class="board-cancel" data-sc="remove" data-idx="@i" title="Remove">✕</button></td>
-                                    </tr>
+                                    @if (i == _scEdit && _builderOptions is not null)
+                                    {
+                                        <tr class="sc-editrow" data-ridx="@i">
+                                            <td>@(i + 1)</td>
+                                            <td><input id="sce-off" class="builder-select" value="@FormatOffset(m.OffsetSeconds)" /></td>
+                                            <td>—</td>
+                                            <td>—</td>
+                                            <td>
+                                                <select id="sce-pick" class="builder-select">
+                                                    @foreach (var n in _builderOptions.PickLocations)
+                                                    {
+                                                        <option value="@n" selected="@(n == m.PickLocation)">@n</option>
+                                                    }
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <select id="sce-drop" class="builder-select">
+                                                    @foreach (var n in _builderOptions.DropLocations)
+                                                    {
+                                                        <option value="@n" selected="@(n == m.DropLocation)">@n</option>
+                                                    }
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <select id="sce-pri" class="builder-select">
+                                                    @foreach (var p in _builderOptions.Priorities)
+                                                    {
+                                                        <option value="@p" selected="@(p == m.Priority)">@p</option>
+                                                    }
+                                                </select>
+                                            </td>
+                                            <td>—</td>
+                                            <td class="sc-status-pending">Editing</td>
+                                            <td class="sc-editbtns">
+                                                <button class="sc-btn" data-sc="editsave" data-idx="@i">SAVE</button>
+                                                <button class="sc-btn" data-sc="editcancel">CANCEL</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                    else
+                                    {
+                                        <tr data-ridx="@i" class="@(_scSel.Contains(i) ? "sc-sel" : "")">
+                                            <td>@(i + 1)</td>
+                                            <td>@FormatOffset(m.OffsetSeconds)</td>
+                                            <td>—</td>
+                                            <td>—</td>
+                                            <td>@m.PickLocation</td>
+                                            <td>@m.DropLocation</td>
+                                            <td>@m.Priority</td>
+                                            <td>—</td>
+                                            <td class="sc-status-pending">Draft</td>
+                                            <td>
+                                                <button class="board-cancel" data-sc="edit" data-idx="@i" title="Edit">&#9998;</button>
+                                                <button class="board-cancel" data-sc="remove" data-idx="@i" title="Remove">✕</button>
+                                            </td>
+                                        </tr>
+                                    }
                                 }
                             }
                         </tbody>
@@ -599,6 +647,11 @@
     private bool _scOpen;
     private bool _scShowRun;
     private readonly List<ScenarioMissionDef> _scDraft = new();
+    private readonly HashSet<int> _scSel = new();   // selected draft rows
+    private int _scAnchor = -1;                      // anchor for Shift+click
+    private int _scEdit = -1;                        // draft row being edited
+
+    private void ScResetView() { _scSel.Clear(); _scAnchor = -1; _scEdit = -1; }
     private List<string> _scSaved = new();
     private ScenarioRunDto? _scRun;
     private System.Threading.CancellationTokenSource? _scCts;
@@ -643,6 +696,7 @@
                 case "add":
                     if (running) { msg = "Simulation running: stop it first."; break; }
                     if (!TryParseOffset(offset, out var off)) { msg = "T+ must be seconds, mm:ss or h:mm:ss."; break; }
+                    ScResetView();
                     _scDraft.Add(new ScenarioMissionDef(off, pick, drop, priority));
                     var sorted = _scDraft.OrderBy(m => m.OffsetSeconds).ToList(); // stable
                     _scDraft.Clear(); _scDraft.AddRange(sorted);
@@ -651,12 +705,84 @@
                     break;
                 case "remove":
                     if (running) { msg = "Simulation running: stop it first."; break; }
+                    ScResetView();
                     if (int.TryParse(idx, out var i) && i >= 0 && i < _scDraft.Count) _scDraft.RemoveAt(i);
                     break;
                 case "clear":
                     if (running) { msg = "Simulation running: stop it first."; break; }
+                    ScResetView();
                     _scDraft.Clear(); Scenarios.ClearRun(); _scRun = null; _scShowRun = false;
                     break;
+                case "select":
+                    {
+                        if (running) break;
+                        var sp = (idx ?? "").Split('|');
+                        if (sp.Length < 3 || !int.TryParse(sp[0], out var scA) || !int.TryParse(sp[1], out var scB)) break;
+                        if (scA < 0 || scB < 0 || scA >= _scDraft.Count || scB >= _scDraft.Count) break;
+                        var scCtrl = sp[2].Contains('c');
+                        var scShift = sp[2].Contains('s');
+                        if (scA != scB)
+                        {
+                            if (!scCtrl) _scSel.Clear();
+                            for (var k = Math.Min(scA, scB); k <= Math.Max(scA, scB); k++) _scSel.Add(k);
+                            _scAnchor = scA;
+                        }
+                        else if (scShift && _scAnchor >= 0 && _scAnchor < _scDraft.Count)
+                        {
+                            if (!scCtrl) _scSel.Clear();
+                            for (var k = Math.Min(_scAnchor, scA); k <= Math.Max(_scAnchor, scA); k++) _scSel.Add(k);
+                        }
+                        else if (scCtrl)
+                        {
+                            if (!_scSel.Remove(scA)) _scSel.Add(scA);
+                            _scAnchor = scA;
+                        }
+                        else
+                        {
+                            _scSel.Clear(); _scSel.Add(scA); _scAnchor = scA;
+                        }
+                        msg = $"{_scSel.Count} row(s) selected.";
+                        break;
+                    }
+                case "edit":
+                    if (running) { msg = "Simulation running: stop it first."; break; }
+                    if (int.TryParse(idx, out var scE) && scE >= 0 && scE < _scDraft.Count)
+                    {
+                        _scEdit = scE; _scSel.Clear(); _scSel.Add(scE); _scAnchor = scE;
+                    }
+                    break;
+                case "editcancel":
+                    _scEdit = -1;
+                    break;
+                case "editsave":
+                    if (running) { msg = "Simulation running: stop it first."; break; }
+                    if (_scEdit < 0 || _scEdit >= _scDraft.Count) { _scEdit = -1; break; }
+                    if (!TryParseOffset(offset, out var scOff)) { msg = "T+ must be seconds, mm:ss or h:mm:ss."; break; }
+                    _scDraft[_scEdit] = new ScenarioMissionDef(scOff, pick, drop, priority);
+                    msg = $"Row {_scEdit + 1} updated.";
+                    _scEdit = -1;
+                    break;
+                case "dup":
+                    {
+                        if (running) { msg = "Simulation running: stop it first."; break; }
+                        var scRows = _scSel.Where(k => k >= 0 && k < _scDraft.Count).OrderBy(k => k).ToList();
+                        if (scRows.Count == 0) { msg = "Select one or more rows first."; break; }
+                        var scShiftText = string.IsNullOrWhiteSpace(offset) ? "0:00" : offset;
+                        if (!TryParseOffset(scShiftText, out var scShiftSec)) { msg = "T+ shift must be seconds, mm:ss or h:mm:ss."; break; }
+                        var scFirst = _scDraft.Count;
+                        foreach (var k in scRows)
+                        {
+                            var src = _scDraft[k];
+                            _scDraft.Add(src with { OffsetSeconds = src.OffsetSeconds + scShiftSec });
+                        }
+                        _scEdit = -1;
+                        _scSel.Clear();
+                        for (var k = scFirst; k < _scDraft.Count; k++) _scSel.Add(k);
+                        _scAnchor = scFirst;
+                        _scShowRun = false;
+                        msg = $"{scRows.Count} mission(s) appended; {_scDraft.Count} in draft.";
+                        break;
+                    }
                 case "save":
                     if (string.IsNullOrWhiteSpace(ScenarioService.SafeName(name))) { msg = "Enter a simulation name."; break; }
                     if (_scDraft.Count == 0) { msg = "Nothing to save: add missions first."; break; }
@@ -668,6 +794,7 @@
                     if (running) { msg = "Simulation running: stop it first."; break; }
                     var def = Scenarios.Load(saved);
                     if (def is null) { msg = "Pick a saved simulation to load."; break; }
+                    ScResetView();
                     _scDraft.Clear(); _scDraft.AddRange(def.Missions);
                     _scShowRun = false;
                     msg = $"Loaded '{def.Name}' ({def.Missions.Count} missions).";

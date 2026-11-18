@@ -171,6 +171,7 @@ try
     builder.Services.AddSingleton<VehicleRegistry>();
     builder.Services.AddSingleton<ActiveMissionRegistry>();
     builder.Services.AddSingleton<AGV.Topology.Services.LocationCatalog>();
+    builder.Services.AddSingleton<AGV.Fleet.Services.ParkingPools>();
     builder.Services.AddSingleton<CheckTableCache>();
     builder.Services.AddSingleton<RuntimeBlockingState>();
     builder.Services.AddSingleton<TopologyVersionManager>();
@@ -194,6 +195,9 @@ try
             sp.GetRequiredService<RuntimeBlockingState>());
     });
     builder.Services.AddHostedService<TopologyBackgroundService>();
+
+    if (builder.Configuration.GetValue<bool>("Simulation:PersistVehicleState"))
+        builder.Services.AddHostedService<AGV.Host.VehicleStatePersistenceService>();
 
     // ----------------------------------------------------------------
     // Routing
@@ -446,6 +450,16 @@ try
 
         registry.RegisterAll(vehicles);
 
+        if (app.Configuration.GetValue<bool>("Simulation:PersistVehicleState"))
+            await AGV.Host.VehicleStatePersistenceService.RestoreAsync(
+                db, registry,
+                app.Services.GetRequiredService<ILoggerFactory>()
+                   .CreateLogger("VehicleRestore"));
+
+        await AGV.Host.CheckTableLoader.LoadAsync(db,
+            app.Services.GetRequiredService<AGV.Fleet.Infrastructure.CheckTableCache>(),
+            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("CheckTable"));
+
         Log.Information("VehicleRegistry loaded: {Count} vehicles",
             vehicles.Count);
     }
@@ -510,6 +524,23 @@ try
         Console.WriteLine(
             $"Location catalog: {locationCatalog.LocationCount} locations, " +
             $"{locationCatalog.AssignmentCount} assignments.");
+
+        // Park / charge location pools (information only for now: nothing
+        // consumes them yet). Node type 2 is NoStopNode, which the router
+        // cannot route to, so it is not a usable park location.
+        var currentNodes = (await db.Set<AGV.Core.Entities.Node>()
+                .AsNoTracking().ToListAsync())
+            .GroupBy(n => n.NodeId)
+            .Select(g => g.OrderByDescending(n => n.EffectiveFromVersionId).First())
+            .Where(n => !n.IsDeleted)
+            .ToList();
+        var parkingPools = app.Services
+            .GetRequiredService<AGV.Fleet.Services.ParkingPools>();
+        parkingPools.Load(
+            locationCatalog,
+            currentNodes.Where(n => (int)n.NodeType != 2)
+                        .Select(n => n.NodeId).ToHashSet());
+        Log.Information("{Pools}", parkingPools.Describe());
 
         // Mission generation from locations (location name + operation).
         // Press stands are the P4x_NN drop locations; pickups are the

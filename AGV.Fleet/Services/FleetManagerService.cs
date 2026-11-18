@@ -78,6 +78,18 @@ namespace AGV.Fleet.Services
         // Vehicles held (paused) until the order that resumes their mission
         // has been delivered; the pause is then released.
         private readonly ConcurrentDictionary<int, bool> _resumeAfterOrder = new();
+
+        private readonly ParkingPools _pools;
+
+        // Vehicle -> its current park / charge-park order (see ParkOrder).
+        private readonly ConcurrentDictionary<int, ParkOrder> _parkOrders = new();
+        private readonly ConcurrentDictionary<int, DateTime> _parkLogAt = new();
+
+        // SOC bands (percent) that decide where an idle vehicle goes.
+        private const decimal MandatoryBelowSoc = 30m;   // < : mandatory charge
+        private const decimal ParkOnlyAboveSoc = 75m;    // > : park only, no charge
+        private const decimal QueueFloorSoc = 50m;       // queue only if >=
+
         public FleetManagerService(
             VehicleRegistry registry,
             ActiveMissionRegistry activeMissions,
@@ -90,8 +102,10 @@ namespace AGV.Fleet.Services
             ICustomizationApi customization,
             IVehicleAdapter adapter,
             RoadMapGraphHolder graphHolder,
+            ParkingPools pools,
             ILoggerFactory loggerFactory)
         {
+            _pools = pools;
             _registry = registry;
             _activeMissions = activeMissions;
             _windows = windows;
@@ -116,6 +130,9 @@ namespace AGV.Fleet.Services
         {
             _logger.LogInformation("FleetManagerService starting");
 
+            // Every vehicle standing on a node holds it from the start.
+            await HoldStandingNodesAsync(stoppingToken);
+
             // Start parallel consumers
             var stateTask = ConsumeVehicleStateUpdatesAsync(stoppingToken);
             var transferTask = ConsumeMissionTransfersAsync(stoppingToken);
@@ -130,6 +147,33 @@ namespace AGV.Fleet.Services
                                deadlockTask);
 
             _logger.LogInformation("FleetManagerService stopped");
+        }
+
+        /// <summary>
+        /// A vehicle standing on a node must hold its lock: take it for
+        /// the node if no one holds it. Used at startup (initial or
+        /// restored positions) and when a vehicle stays where it is.
+        /// </summary>
+        private async Task EnsureNodeHeldAsync(Vehicle v, CancellationToken ct)
+        {
+            if (!v.IsInService) return;
+            if (v.CurrentNodeId is not int n || n <= 0) return;
+            if (_traffic.GetLockedNodeIds().Contains(n)) return;
+            await _traffic.HoldNodeAsync(v.VehicleId, n, ct);
+        }
+
+        private async Task HoldStandingNodesAsync(CancellationToken ct)
+        {
+            var held = 0;
+            foreach (var v in _registry.GetAll().OrderBy(x => x.VehicleId))
+            {
+                var before = _traffic.GetVehicleLockedNodeIds(v.VehicleId).Count;
+                await EnsureNodeHeldAsync(v, ct);
+                if (_traffic.GetVehicleLockedNodeIds(v.VehicleId).Count > before)
+                    held++;
+            }
+            _logger.LogInformation(
+                "Startup: {Held} vehicles now hold the node they stand on", held);
         }
 
         // ----------------------------------------------------------------
@@ -412,6 +456,13 @@ namespace AGV.Fleet.Services
             var vehicle = _registry.GetById(vehicleId);
             if (vehicle is null || !vehicle.IsInService) return false;
 
+            // Out of service retracts the charger contact: a charging
+            // vehicle stops charging. (Paused/manual does not: a paused
+            // vehicle on a charger keeps charging.)
+            if (vehicle.ActivityState == ActivityState.OpportunityCharging
+                || vehicle.ActivityState == ActivityState.MandatoryCharging)
+                await SendActionAsync(vehicle, "stopCharging", cancellationToken);
+
             // Stop the vehicle, then flush its route. The mission stays.
             await SendPauseAsync(vehicle, true, cancellationToken);
             _windows.Cancel(vehicleId);
@@ -423,6 +474,7 @@ namespace AGV.Fleet.Services
             _resumePickup.TryRemove(vehicleId, out _);
             _resumeRetryAt.TryRemove(vehicleId, out _);
             _resumeAfterOrder.TryRemove(vehicleId, out _);
+            _parkOrders.TryRemove(vehicleId, out _);
 
             vehicle.ClearPlannedRoute();
             vehicle.SetManual(false);
@@ -441,6 +493,26 @@ namespace AGV.Fleet.Services
                 keepLocks ? "KEPT" : "released");
             return true;
         }
+
+        private Task SendActionAsync(
+            Vehicle vehicle, string actionType,
+            CancellationToken cancellationToken)
+            => _adapter.SendInstantActionAsync(
+                vehicle.SerialNumber,
+                new VehicleInstantAction
+                {
+                    HeaderId = Guid.NewGuid().ToString("N")[..8],
+                    InstantActions = new[]
+                    {
+                        new OrderAction
+                        {
+                            ActionId = Guid.NewGuid().ToString("N")[..8],
+                            ActionType = actionType,
+                            BlockingType = "HARD",
+                        }
+                    },
+                },
+                cancellationToken);
 
         private Task SendPauseAsync(
             Vehicle vehicle, bool pause, CancellationToken cancellationToken)
@@ -797,30 +869,48 @@ namespace AGV.Fleet.Services
                 var candidates = SelectCandidateVehicles(mission);
                 if (candidates.Count == 0) break;
 
-                bool dispatched = false;
-                foreach (var vehicle in candidates)
+                // Route every candidate to the pickup and rank by the
+                // shortest ROUTE (estimated travel time), not straight-line
+                // distance. SOC breaks ties.
+                var routedAll = await Task.WhenAll(candidates.Select(async cand =>
                 {
                     // A vehicle's own locks (the node it stands on) are not
                     // obstacles to its own route.
-                    var ownBlockedNodes = BlockedNodesFor(vehicle.VehicleId);
-                    var route = await _routing.FindRouteAsync(
-                        vehicle.CurrentNodeId ?? 0,
+                    var candBlocked = BlockedNodesFor(cand.VehicleId);
+                    var candRoute = await _routing.FindRouteAsync(
+                        cand.CurrentNodeId ?? 0,
                         mission.PickupNodeId,
-                        vehicle.VehicleId,
-                        ownBlockedNodes,
-                        BlockedMovesFor(vehicle.VehicleId),
+                        cand.VehicleId,
+                        candBlocked,
+                        BlockedMovesFor(cand.VehicleId),
                         stoppingToken);
 
-                    if (route is null)
-                    {
+                    if (candRoute is null)
                         await LogNoRouteAsync(
-                            vehicle, mission.MissionId, mission.PickupNodeId,
-                            ownBlockedNodes, stoppingToken);
-                        continue;
-                    }
+                            cand, mission.MissionId, mission.PickupNodeId,
+                            candBlocked, stoppingToken);
 
+                    return new { Vehicle = cand, Route = candRoute };
+                }));
+
+                var ranked = routedAll
+                    .Where(x => x.Route is not null)
+                    .OrderBy(x => x.Route!.EstimatedTravelTimeSeconds)
+                    .ThenByDescending(x => x.Vehicle.BatteryStateOfCharge)
+                    .ToList();
+
+                bool dispatched = false;
+                foreach (var rc in ranked)
+                {
+                    var vehicle = rc.Vehicle;
+                    var route = rc.Route!;
                     // Route found — dequeue and dispatch
                     _missionQueue.Dequeue();
+
+                    // A park / discretionary-charge order is crushed
+                    // (cancelled) by the mission; the new order replaces it.
+                    await CrushParkOrderAsync(
+                        vehicle, mission.MissionId, stoppingToken);
 
                     _dispatchLogger.LogInformation(
                         "Dispatching vehicle {VehicleId} from node {NodeId} to pickup {PickupNodeId}",
@@ -943,6 +1033,23 @@ namespace AGV.Fleet.Services
                         vehicle.VehicleId, update.LastNodeId, stoppingToken);
             }
 
+            // Arrived at the node of its park / charge-park order
+            if (_parkOrders.TryGetValue(vehicle.VehicleId, out var po)
+                && !po.Arrived && update.LastNodeId == po.NodeId
+                && !vehicle.CurrentMissionId.HasValue)
+            {
+                _parkOrders[vehicle.VehicleId] = po with { Arrived = true };
+                vehicle.ClearPlannedRoute();
+                await _channels.MissionUpdates.Writer.WriteAsync(
+                    new VehicleMissionUpdate(
+                        vehicle.VehicleId, null, Array.Empty<int>()),
+                    stoppingToken);
+                _dispatchLogger.LogInformation(
+                    "Vehicle {VehicleId} parked at node {NodeId} ({Kind}, SOC {Soc:F0}%)",
+                    vehicle.VehicleId, po.NodeId, po.Kind,
+                    vehicle.BatteryStateOfCharge);
+            }
+
             // Picked up: send the drop leg as a new order
             await TryDispatchDropLegAsync(vehicle, update, stoppingToken);
 
@@ -978,6 +1085,9 @@ namespace AGV.Fleet.Services
                         null,
                         Array.Empty<int>()),
                     stoppingToken);
+                // Idle again: let the dispatch loop park/charge it now
+                // instead of waiting for the periodic wake.
+                _dispatchSignal.Release();
                 Interlocked.Increment(ref _completedMissions); _dispatchLogger.LogInformation(
                     "Vehicle {VehicleId} completed mission — total completed: {Total}",
                     vehicle.VehicleId, _completedMissions);
@@ -1275,22 +1385,83 @@ namespace AGV.Fleet.Services
         // Vehicle selection
         // ----------------------------------------------------------------
 
+        /// <summary>
+        /// Vehicles that can take the mission: idle ones, plus vehicles
+        /// heading to / sitting at a park or discretionary-charge location
+        /// (their park order is crushed when chosen). Mandatory-charge
+        /// vehicles and anything below the mandatory SOC are never
+        /// candidates. Ordered by proximity to the pickup.
+        /// </summary>
         private List<Vehicle> SelectCandidateVehicles(MissionContext mission)
         {
-            var candidates = _registry.GetAvailableForDispatch()
-                .Where(v => v.BatteryStateOfCharge >
-                    _charging.GetThresholds().MandatoryEnterSoc)
+            var all = _registry.GetInService()
+                .Where(v => v.IsOnline && !v.IsManual && !v.IsLoaded
+                         && !v.CurrentMissionId.HasValue
+                         && v.BatteryStateOfCharge >= MandatoryBelowSoc)
                 .ToList();
+
+            var candidates = all
+                .Where(v => v.IsAvailableForDispatch
+                         || (_parkOrders.TryGetValue(v.VehicleId, out var po)
+                             && po.Kind != ParkKind.Mandatory))
+                .ToList();
+
+            // Queue discipline: vehicles still on their way to (or waiting
+            // behind) the queue head cannot pass it, so they are not
+            // candidates while another vehicle sits at the head.
+            if (_pools.QueueNodeId is int qn
+                && _parkOrders.Any(kv => kv.Value.NodeId == qn && kv.Value.Arrived))
+            {
+                candidates = candidates
+                    .Where(v => !(_parkOrders.TryGetValue(v.VehicleId, out var qpo)
+                                  && qpo.NodeId == qn && !qpo.Arrived))
+                    .ToList();
+            }
+
+            if (candidates.Count == 0 && (DateTime.UtcNow - _lastNoCandLog).TotalSeconds > 30)
+            {
+                _lastNoCandLog = DateTime.UtcNow;
+                var why = _registry.GetAll().OrderBy(v => v.VehicleId).Select(v =>
+                {
+                    string r;
+                    if (!v.IsInService) r = "oos";
+                    else if (!v.IsOnline) r = "offline";
+                    else if (v.IsManual) r = "manual";
+                    else if (v.IsLoaded) r = "loaded";
+                    else if (v.CurrentMissionId.HasValue) r = "mission" + v.CurrentMissionId;
+                    else if (v.BatteryStateOfCharge < MandatoryBelowSoc) r = "soc" + (int)v.BatteryStateOfCharge;
+                    else if (_parkOrders.TryGetValue(v.VehicleId, out var d))
+                        r = d.Kind + (d.Arrived ? "@" : "->") + d.NodeId;
+                    else r = "noOrder:" + v.ActivityState + "/" + v.OrderState;
+                    return "F" + v.VehicleId + "=" + r;
+                });
+                _logger.LogInformation("No candidates: {Why}", string.Join(" ", why));
+            }
 
             _logger.LogInformation(
-                "SelectCandidateVehicles: {Total} registered, {Available} available for dispatch, {Candidates} above SOC threshold",
-                _registry.Count,
-                _registry.GetAvailableForDispatch().Count,
-                candidates.Count);
+                "SelectCandidateVehicles: {Total} registered, {Candidates} candidates " +
+                "({Parked} parked/parking)",
+                _registry.Count, candidates.Count,
+                candidates.Count(v => _parkOrders.ContainsKey(v.VehicleId)));
 
             return candidates
-                .OrderByDescending(v => v.BatteryStateOfCharge)
+                .OrderBy(v => DistanceBetween(
+                    v.CurrentNodeId ?? 0, mission.PickupNodeId))
+                .ThenByDescending(v => v.BatteryStateOfCharge)
                 .ToList();
+        }
+
+        /// <summary>Straight-line distance between two nodes (map units).</summary>
+        private double DistanceBetween(int nodeA, int nodeB)
+        {
+            if (!_graphHolder.IsReady) return double.MaxValue;
+            var g = _graphHolder.GetRequired();
+            var a = g.GetNode(nodeA);
+            var b = g.GetNode(nodeB);
+            if (a is null || b is null) return double.MaxValue;
+            var dx = Convert.ToDouble(a.Position.X) - Convert.ToDouble(b.Position.X);
+            var dy = Convert.ToDouble(a.Position.Y) - Convert.ToDouble(b.Position.Y);
+            return Math.Sqrt(dx * dx + dy * dy);
         }
 
         // ----------------------------------------------------------------
@@ -1300,26 +1471,300 @@ namespace AGV.Fleet.Services
         private async Task EvaluateChargingAsync(
             CancellationToken stoppingToken)
         {
-            var idleVehicles = _registry.GetInService()
-                .Where(v => v.IsOnline
-                         && v.OrderState == OrderState.Idle
-                         && !_charging.IsVehicleCharging(v.VehicleId))
+            if (!_graphHolder.IsReady) return;
+
+            var vehicles = _registry.GetInService()
+                .Where(v => v.IsOnline && !v.IsManual && !v.IsLoaded
+                         && !v.CurrentMissionId.HasValue
+                         && (v.CurrentNodeId ?? 0) > 0)
+                // Neediest first: free chargers and park spots go to the
+                // lowest battery before anyone else gets a look at them.
+                .OrderBy(v => v.BatteryStateOfCharge)
+                .ThenBy(v => v.VehicleId)
                 .ToList();
 
-            foreach (var vehicle in idleVehicles)
+            foreach (var vehicle in vehicles)
             {
-                var assignment = await _charging.EvaluateChargingNeedAsync(
-                    vehicle.VehicleId,
-                    vehicle.BatteryStateOfCharge,
-                    vehicle.CurrentNodeId ?? 0,
-                    stoppingToken);
-
-                if (assignment is not null)
+                if (!_parkOrders.TryGetValue(vehicle.VehicleId, out var po))
                 {
-                    await _channels.ChargeAssignments.Writer
-                        .WriteAsync(assignment, stoppingToken);
+                    if (!vehicle.IsAvailableForDispatch) continue;
+                    await AssignParkAsync(vehicle, stoppingToken);
+                    continue;
                 }
+
+                // Moved off its park node some other way (restart elsewhere):
+                // forget the order, it is re-evaluated as an idle vehicle.
+                if (po.Arrived && vehicle.CurrentNodeId != po.NodeId)
+                {
+                    _parkOrders.TryRemove(vehicle.VehicleId, out _);
+                    continue;
+                }
+
+                await ReviewParkAsync(vehicle, po, stoppingToken);
             }
+        }
+
+        // ----------------------------------------------------------------
+        // Park / charge-park orders
+        // ----------------------------------------------------------------
+
+        private enum ParkKind { Park, Discretionary, Mandatory }
+
+        /// <summary>
+        /// A vehicle's park / charge-park order: where it is going (or
+        /// sitting) and why. Arrived = reported the node. A Mandatory order
+        /// is uncrushable.
+        /// </summary>
+        private sealed record ParkOrder(
+            ParkKind Kind, int NodeId, string OrderId, bool Arrived);
+
+        private int _lastPoolTried;
+        private DateTime _lastNoCandLog = DateTime.MinValue;
+
+        private bool IsChargerNode(int nodeId)
+            => _pools.ChargerNodes.Contains(nodeId);
+
+        /// <summary>Nodes another vehicle stands on, holds, or is bound for.</summary>
+        private HashSet<int> OccupiedByOthers(int vehicleId)
+        {
+            var s = new HashSet<int>();
+            foreach (var other in _registry.GetAll())
+            {
+                if (other.VehicleId == vehicleId) continue;
+                if (other.CurrentNodeId.HasValue) s.Add(other.CurrentNodeId.Value);
+                s.UnionWith(_traffic.GetVehicleLockedNodeIds(other.VehicleId));
+                if (_parkOrders.TryGetValue(other.VehicleId, out var po))
+                    s.Add(po.NodeId);
+            }
+            return s;
+        }
+
+        /// <summary>
+        /// Nearest free node of the pool that has a route from the vehicle.
+        /// The queue node is never "occupied": vehicles stack behind it.
+        /// </summary>
+        private async Task<(int NodeId, IReadOnlyList<int> Nodes,
+                            IReadOnlyList<int>? Moves)?> PickFromPoolAsync(
+            Vehicle v, IEnumerable<int> pool, bool ignoreOccupancy,
+            CancellationToken ct)
+        {
+            var from = v.CurrentNodeId ?? 0;
+            var occupied = ignoreOccupancy
+                ? new HashSet<int>() : OccupiedByOthers(v.VehicleId);
+
+            var ordered = pool
+                .Where(n => ignoreOccupancy || !occupied.Contains(n))
+                .OrderBy(n => DistanceBetween(from, n))
+                .ToList();
+            _lastPoolTried = ordered.Count;
+
+            foreach (var node in ordered)
+            {
+                if (node == from)
+                    return (node, new[] { from }, null);
+
+                var route = await _routing.FindRouteAsync(
+                    from, node, v.VehicleId,
+                    BlockedNodesFor(v.VehicleId),
+                    BlockedMovesFor(v.VehicleId), ct);
+                if (route is null)
+                {
+                    await LogNoRouteAsync(
+                        v, -node, node, BlockedNodesFor(v.VehicleId), ct);
+                    continue;
+                }
+                return (node,
+                    route.Nodes.Select(n => n.NodeId).ToList(),
+                    route.MoveIds?.ToList());
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Picks the park / charge location for the vehicle by SOC:
+        ///   &lt;30%   mandatory: a free auto charger only.
+        ///   30-75% discretionary: free charger; else (SOC &gt;= 50%) free
+        ///          park-only, then the queue; below 50%: free park-only,
+        ///          else stay where it is.
+        ///   &gt;75%   park-only, then the queue.
+        /// </summary>
+        private async Task<(ParkKind Kind, int NodeId, IReadOnlyList<int> Nodes,
+                            IReadOnlyList<int>? Moves)?> ChooseParkAsync(
+            Vehicle v, CancellationToken ct)
+        {
+            var soc = v.BatteryStateOfCharge;
+
+            if (soc < MandatoryBelowSoc)
+            {
+                var c = await PickFromPoolAsync(v, _pools.ChargerNodes, false, ct);
+                return c is null ? null
+                    : (ParkKind.Mandatory, c.Value.NodeId, c.Value.Nodes, c.Value.Moves);
+            }
+
+            if (soc <= ParkOnlyAboveSoc)
+            {
+                var c = await PickFromPoolAsync(v, _pools.ChargerNodes, false, ct);
+                if (c is not null)
+                    return (ParkKind.Discretionary, c.Value.NodeId, c.Value.Nodes, c.Value.Moves);
+            }
+
+            var p = await PickFromPoolAsync(v, _pools.ParkOnlyNodes, false, ct);
+            if (p is not null)
+                return (ParkKind.Park, p.Value.NodeId, p.Value.Nodes, p.Value.Moves);
+
+            if (soc >= QueueFloorSoc && _pools.QueueNodeId.HasValue)
+            {
+                var q = await PickFromPoolAsync(
+                    v, new[] { _pools.QueueNodeId.Value }, true, ct);
+                if (q is not null)
+                    return (ParkKind.Park, q.Value.NodeId, q.Value.Nodes, q.Value.Moves);
+            }
+            return null;
+        }
+
+        private async Task AssignParkAsync(Vehicle v, CancellationToken ct)
+        {
+            var choice = await ChooseParkAsync(v, ct);
+            if (choice is null)
+            {
+                var occ = OccupiedByOthers(v.VehicleId);
+                var busy = _pools.ParkOnlyNodes.Concat(_pools.ChargerNodes)
+                    .Where(occ.Contains).ToList();
+                var who = busy.Select(n => n + "(" + string.Join("/",
+                    _registry.GetAll()
+                        .Where(o => o.VehicleId != v.VehicleId
+                            && (o.CurrentNodeId == n
+                                || _traffic.GetVehicleLockedNodeIds(o.VehicleId).Contains(n)
+                                || (_parkOrders.TryGetValue(o.VehicleId, out var opo) && opo.NodeId == n)))
+                        .Select(o => "F" + o.VehicleId)) + ")");
+                LogParkThrottled(v, "no free park/charge location - staying at node " +
+                    v.CurrentNodeId + ". Occupied pool nodes: " + string.Join(" ", who));
+                return;
+            }
+            await IssueParkOrderAsync(v, choice.Value, ct);
+        }
+
+        private async Task IssueParkOrderAsync(
+            Vehicle v,
+            (ParkKind Kind, int NodeId, IReadOnlyList<int> Nodes,
+             IReadOnlyList<int>? Moves) c,
+            CancellationToken ct)
+        {
+            var orderId = "PARK-" + Guid.NewGuid().ToString("N")[..8].ToUpper();
+
+            // Already standing on the chosen node: just claim it.
+            if (c.NodeId == v.CurrentNodeId || c.Nodes.Count < 2)
+            {
+                _parkOrders[v.VehicleId] = new ParkOrder(c.Kind, c.NodeId, orderId, true);
+                _dispatchLogger.LogInformation(
+                    "Vehicle {VehicleId} (SOC {Soc:F0}%) stays at node {Node} ({Kind})",
+                    v.VehicleId, v.BatteryStateOfCharge, c.NodeId, c.Kind);
+                await EnsureNodeHeldAsync(v, ct);
+                return;
+            }
+
+            _parkOrders[v.VehicleId] = new ParkOrder(c.Kind, c.NodeId, orderId, false);
+            v.UpdateState(ActivityState.TravelingEmpty, OrderState.Waiting);
+
+            // Show the park itinerary in the vehicle detail / on the map.
+            v.SetPlannedRoute(c.Nodes);
+            await _channels.MissionUpdates.Writer.WriteAsync(
+                new VehicleMissionUpdate(v.VehicleId, null, c.Nodes), ct);
+
+            _dispatchLogger.LogInformation(
+                "Vehicle {VehicleId} (SOC {Soc:F0}%) {From} → node {Node} ({Kind}, {Hops} hops)",
+                v.VehicleId, v.BatteryStateOfCharge, v.CurrentNodeId,
+                c.NodeId, c.Kind, c.Nodes.Count);
+
+            if (await _windows.BeginAsync(
+                    v.SerialNumber, v.VehicleId, orderId,
+                    c.Nodes, c.Moves, ct))
+                return;
+
+            var order = new VehicleOrder
+            {
+                OrderId = orderId,
+                OrderUpdateId = 1,
+                Nodes = c.Nodes
+                    .Select((nodeId, i) => new OrderNode
+                    {
+                        NodeId = nodeId.ToString(),
+                        SequenceId = i,
+                        Released = true,
+                        X = 0m,
+                        Y = 0m,
+                        MapId = string.Empty,
+                        Actions = Array.Empty<OrderAction>(),
+                    })
+                    .ToList(),
+                Edges = Array.Empty<OrderEdge>().ToList(),
+            };
+            await _adapter.SendOrderAsync(v.SerialNumber, order, ct);
+        }
+
+        /// <summary>
+        /// Re-evaluates a standing park order: a vehicle that dropped below
+        /// 30% becomes mandatory; one below 75% parked on a non-charger moves
+        /// to a charger as soon as one is free.
+        /// </summary>
+        private async Task ReviewParkAsync(
+            Vehicle v, ParkOrder po, CancellationToken ct)
+        {
+            if (po.Kind == ParkKind.Mandatory) return;
+            var soc = v.BatteryStateOfCharge;
+
+            if (IsChargerNode(po.NodeId))
+            {
+                // On (or heading to) a charger: only the kind can change.
+                if (soc < MandatoryBelowSoc)
+                {
+                    _parkOrders[v.VehicleId] = po with { Kind = ParkKind.Mandatory };
+                    _dispatchLogger.LogInformation(
+                        "Vehicle {VehicleId} SOC {Soc:F0}% - charge at node {Node} is now MANDATORY",
+                        v.VehicleId, soc, po.NodeId);
+                }
+                return;
+            }
+
+            if (soc > ParkOnlyAboveSoc) return;
+
+            var c = await PickFromPoolAsync(v, _pools.ChargerNodes, false, ct);
+            if (c is null) return;
+
+            var kind = soc < MandatoryBelowSoc
+                ? ParkKind.Mandatory : ParkKind.Discretionary;
+            await IssueParkOrderAsync(
+                v, (kind, c.Value.NodeId, c.Value.Nodes, c.Value.Moves), ct);
+        }
+
+        /// <summary>
+        /// A mission chose this vehicle: cancel its park / charge-park order.
+        /// A charging vehicle retracts its contact first. The mission's
+        /// order replaces the itinerary when it is delivered.
+        /// </summary>
+        private async Task CrushParkOrderAsync(
+            Vehicle v, int missionId, CancellationToken ct)
+        {
+            if (!_parkOrders.TryRemove(v.VehicleId, out var po)) return;
+
+            if (v.ActivityState == ActivityState.OpportunityCharging
+                || v.ActivityState == ActivityState.MandatoryCharging)
+                await SendActionAsync(v, "stopCharging", ct);
+
+            _dispatchLogger.LogInformation(
+                "Vehicle {VehicleId} {Kind} order to node {Node} crushed by mission {MissionId}",
+                v.VehicleId, po.Kind, po.NodeId, missionId);
+        }
+
+        private void LogParkThrottled(Vehicle v, string text)
+        {
+            var now = DateTime.UtcNow;
+            if (_parkLogAt.TryGetValue(v.VehicleId, out var last)
+                && (now - last).TotalSeconds < 60) return;
+            _parkLogAt[v.VehicleId] = now;
+            _dispatchLogger.LogInformation(
+                "Vehicle {VehicleId} (SOC {Soc:F0}%): {Text}",
+                v.VehicleId, v.BatteryStateOfCharge, text);
         }
 
         // ----------------------------------------------------------------

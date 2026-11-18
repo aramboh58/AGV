@@ -860,9 +860,13 @@
             const act = sc.getAttribute('data-sc');
             if (act === 'load') { const n = document.getElementById('sc-name'); if (n) n.value = el('sc-saved'); }
             const msg = document.getElementById('sc-msg');
+            // Edit row uses its own controls; DUPLICATE sends the T+ shift as the offset.
+            const ed = act === 'editsave';
             window.fleetMap._dotNetRef.invokeMethodAsync('ScenarioActionJs',
-                act, el('sc-name'), el('sc-saved'), el('sc-off'),
-                el('sc-pick'), el('sc-drop'), el('sc-pri'),
+                act, el('sc-name'), el('sc-saved'),
+                act === 'dup' ? el('sc-shift') : el(ed ? 'sce-off' : 'sc-off'),
+                el(ed ? 'sce-pick' : 'sc-pick'), el(ed ? 'sce-drop' : 'sc-drop'),
+                el(ed ? 'sce-pri' : 'sc-pri'),
                 sc.getAttribute('data-idx') || '')
                 .then(t => { if (msg && t) msg.textContent = t; });
             return;
@@ -908,6 +912,67 @@
             return;
         }
     });
+
+    // ----------------------------------------------------------------
+    // Simulation draft grid: row select (click / Ctrl / Shift / drag),
+    // and edit (double-click or right-click). Selection state lives on
+    // the server (Dashboard.razor); this only reports gestures.
+    // ----------------------------------------------------------------
+    (function () {
+        let dn = null;   // { a: start row index, b: last row index under cursor }
+        const rowOf = t => (t && t.closest) ? t.closest('tr[data-ridx]') : null;
+        const isCtl = t => !!(t && t.closest && t.closest('button, input, select, textarea, [data-sc]'));
+        const idxOf = r => parseInt(r.getAttribute('data-ridx'));
+        const send = (act, idx) => {
+            const ref = window.fleetMap._dotNetRef;
+            if (!ref) return;
+            const msg = document.getElementById('sc-msg');
+            ref.invokeMethodAsync('ScenarioActionJs', act, '', '', '', '', '', '', idx)
+                .then(t => { if (msg && t) msg.textContent = t; });
+        };
+        const paint = (a, b) => {
+            const lo = Math.min(a, b), hi = Math.max(a, b);
+            document.querySelectorAll('tr[data-ridx]').forEach(r => {
+                const i = idxOf(r);
+                r.classList.toggle('sc-drag', a !== b && i >= lo && i <= hi);
+            });
+        };
+
+        document.addEventListener('mousedown', function (e) {
+            if (e.button !== 0) return;
+            const r = rowOf(e.target);
+            if (!r || r.classList.contains('sc-editrow') || isCtl(e.target)) return;
+            dn = { a: idxOf(r), b: idxOf(r) };
+            e.preventDefault();      // no text selection while dragging across rows
+        });
+
+        document.addEventListener('mouseover', function (e) {
+            if (!dn) return;
+            const r = rowOf(e.target);
+            if (!r || r.classList.contains('sc-editrow')) return;
+            dn.b = idxOf(r);
+            paint(dn.a, dn.b);
+        });
+
+        document.addEventListener('mouseup', function (e) {
+            if (!dn) return;
+            const d = dn; dn = null;
+            paint(0, 0);
+            const flags = ((e.ctrlKey || e.metaKey) ? 'c' : '') + (e.shiftKey ? 's' : '');
+            send('select', d.a + '|' + d.b + '|' + flags);
+        });
+
+        function editGesture(e) {
+            const r = rowOf(e.target);
+            if (!r || r.classList.contains('sc-editrow') || isCtl(e.target)) return false;
+            send('edit', String(idxOf(r)));
+            return true;
+        }
+        document.addEventListener('dblclick', editGesture);
+        document.addEventListener('contextmenu', function (e) {
+            if (editGesture(e)) e.preventDefault();
+        });
+    })();
 
     // ----------------------------------------------------------------
     // Floating panels: drag by title, remember position, bring to front

@@ -51,6 +51,7 @@ namespace AGV.Fleet.Services
         private readonly VehicleRegistry _registry;
         private readonly ChannelRegistry _channels;
         private readonly ICustomizationApi _customization;
+        private readonly RoadMapGraphHolder _graphHolder;
         private readonly ILogger _logger;
         private readonly ILogger _lockLogger;
         private readonly ILogger _deadlockLogger;
@@ -86,14 +87,22 @@ namespace AGV.Fleet.Services
 
         private readonly object _trafficLock = new();
 
+        // Check-induced waits: vehicle -> vehicle holding the guarded node
+        // or move that made its check fail. Lets deadlock detection see
+        // cycles that run through checks, not just through node locks.
+        // Guarded by _trafficLock.
+        private readonly Dictionary<int, (int Holder, int Guarded, bool IsMove)> _checkWaits = new();
+
         public TrafficManagerService(
             RuntimeBlockingState blockingState,
             CheckTableCache checkTable,
             VehicleRegistry registry,
             ChannelRegistry channels,
             ICustomizationApi customization,
+            RoadMapGraphHolder graphHolder,
             ILoggerFactory loggerFactory)
         {
+            _graphHolder = graphHolder;
             _blockingState = blockingState;
             _checkTable = checkTable;
             _registry = registry;
@@ -177,6 +186,7 @@ namespace AGV.Fleet.Services
             {
                 // Clear any contention record for this vehicle/node
                 ClearContention(vehicleId, toNodeId);
+                lock (_trafficLock) _checkWaits.Remove(vehicleId);
             }
             else if (clearance == TrafficClearance.Hold)
             {
@@ -288,6 +298,7 @@ namespace AGV.Fleet.Services
                     _contentionTicks.Remove(key);
 
                 _vehicleItineraries.Remove(vehicleId);
+                _checkWaits.Remove(vehicleId);
             }
 
             _logger.LogInformation(
@@ -327,6 +338,7 @@ namespace AGV.Fleet.Services
                 foreach (var key in _contentionTicks.Keys
                     .Where(k => k.Item1 == vehicleId).ToList())
                     _contentionTicks.Remove(key);
+                _checkWaits.Remove(vehicleId);
             }
         }
 
@@ -582,6 +594,16 @@ namespace AGV.Fleet.Services
                 {
                     waitFor[waiting] = holder;
                 }
+                else
+                {
+                    // Not waiting on a node lock: waiting on a check?
+                    lock (_trafficLock)
+                    {
+                        if (_checkWaits.TryGetValue(waiting, out var cw)
+                            && cw.Holder != waiting)
+                            waitFor[waiting] = cw.Holder;
+                    }
+                }
             }
 
             var cycles = new List<List<int>>();
@@ -636,10 +658,13 @@ namespace AGV.Fleet.Services
             CancellationToken cancellationToken)
         {
             var nodeChecks = _checkTable.GetNodeChecks(toNodeId);
-            if (nodeChecks.Count == 0)
+            // Move-owned checks: NYT move key = fromNode * 10000 + toNode
+            var moveChecks = _checkTable.GetMoveChecks(
+                fromNodeId * 10000 + toNodeId);
+            if (nodeChecks.Count == 0 && moveChecks.Count == 0)
                 return TrafficClearance.Granted;
 
-            foreach (var check in nodeChecks)
+            foreach (var check in nodeChecks.Concat(moveChecks))
             {
                 var result = await EvaluateCheckAsync(
                     check, vehicleId, fromNodeId, toNodeId,
@@ -668,15 +693,16 @@ namespace AGV.Fleet.Services
         {
             return check.CheckType switch
             {
-                CheckType.Node =>
-                    _blockingState.IsNodeBlocked(check.GuardedResourceId)
-                        ? TrafficClearance.Hold
-                        : TrafficClearance.Granted,
+                // Node / Distance: guarded node held by another vehicle.
+                // Move: guarded move held by another vehicle.
+                // A check with a distance only blocks when the holder is
+                // closer than that to the owner node. A vehicle's own locks
+                // never block its own checks.
+                CheckType.Node or CheckType.Distance =>
+                    EvaluateGuardCheck(check, vehicleId, toNodeId, false),
 
                 CheckType.Move =>
-                    _blockingState.IsMoveBlocked(check.GuardedResourceId)
-                        ? TrafficClearance.Hold
-                        : TrafficClearance.Granted,
+                    EvaluateGuardCheck(check, vehicleId, toNodeId, true),
 
                 CheckType.Aplus when check.AplusMacroName is not null =>
                     await _customization.EvaluateScriptCheckAsync(
@@ -686,15 +712,106 @@ namespace AGV.Fleet.Services
                         toNodeId,
                         cancellationToken),
 
-                // NodeWithItinerary, Distance, Itinerary:
+                // NodeWithItinerary, Itinerary:
                 // Phase 1 stub — pass through for now
                 _ => TrafficClearance.Granted,
             };
         }
 
+        /// <summary>
+        /// Guard check (Node, Move or Distance type). The guarded node (or
+        /// move) blocks the vehicle entering the owner node only while
+        /// another vehicle holds it. If the check has a distance (mm), the
+        /// holder only blocks while it is closer than that to the owner
+        /// node; deeper in the spur than that, the traversing vehicle may
+        /// pass. The holder's position is its last reported node (the
+        /// distance along its current move is not used yet).
+        /// </summary>
+        private TrafficClearance EvaluateGuardCheck(
+            CheckRecord check, int vehicleId, int ownerNodeId, bool guardIsMove)
+        {
+            NodeBlockRecord? nodeBlock = null;
+            int? holder;
+
+            if (guardIsMove)
+            {
+                // (guarded id for display: the guarded move's id)
+                if (!_checkTable.TryGetMoveId(
+                        check.GuardedResourceId, out var guardedMoveId))
+                    return TrafficClearance.Granted;
+                var moveBlock = _blockingState.GetMoveBlock(guardedMoveId);
+                if (moveBlock is null) return TrafficClearance.Granted;
+                holder = moveBlock.LockedByVehicleId;
+            }
+            else
+            {
+                nodeBlock = _blockingState.GetNodeBlock(check.GuardedResourceId);
+                if (nodeBlock is null) return TrafficClearance.Granted;
+                holder = nodeBlock.LockedByVehicleId;
+            }
+
+            // Engineer block: always blocks
+            if (holder is not int h) return TrafficClearance.Hold;
+            if (h == vehicleId) return TrafficClearance.Granted;
+
+            // No distance given: plain check
+            if (check.DistanceMm is not int limitMm)
+            {
+                NoteCheckWait(vehicleId, h, check.GuardedResourceId, guardIsMove);
+                return TrafficClearance.Hold;
+            }
+
+            if (!_graphHolder.IsReady) return TrafficClearance.Hold;
+            var graph = _graphHolder.GetRequired();
+
+            var holderNodeId = _registry.GetById(h)?.CurrentNodeId;
+            var owner = graph.GetNode(ownerNodeId);
+            var at = holderNodeId.HasValue
+                ? graph.GetNode(holderNodeId.Value) : null;
+            if (owner is null || at is null) return TrafficClearance.Hold;
+
+            var dx = Convert.ToDouble(owner.Position.X)
+                   - Convert.ToDouble(at.Position.X);
+            var dy = Convert.ToDouble(owner.Position.Y)
+                   - Convert.ToDouble(at.Position.Y);
+            var distMm = Math.Sqrt(dx * dx + dy * dy) * 10.0; // map is cm
+
+            var clear = distMm > limitMm;
+            if (!clear) NoteCheckWait(vehicleId, h, check.GuardedResourceId, guardIsMove);
+            _lockLogger.LogDebug(
+                "Distance check {CheckId}: vehicle {VehicleId} entering node " +
+                "{Owner}; {Kind} {Guarded} held by {Holder} at node {At}, " +
+                "{Dist:F0} mm from owner (limit {Limit} mm) -> {Result}",
+                check.CheckId, vehicleId, ownerNodeId,
+                guardIsMove ? "move" : "node", check.GuardedResourceId, h,
+                holderNodeId, distMm, limitMm, clear ? "clear" : "hold");
+            return clear ? TrafficClearance.Granted : TrafficClearance.Hold;
+        }
+
         // ----------------------------------------------------------------
         // Contention tracking helpers
         // ----------------------------------------------------------------
+
+        private void NoteCheckWait(
+            int vehicleId, int holderVehicleId, int guardedId, bool isMove)
+        {
+            lock (_trafficLock)
+                _checkWaits[vehicleId] = (holderVehicleId, guardedId, isMove);
+        }
+
+        /// <summary>
+        /// The check currently holding a vehicle, if any: the vehicle that
+        /// holds the guarded node (or move) and the guarded id. Used by the
+        /// dashboard popup.
+        /// </summary>
+        public (int HolderVehicleId, int GuardedId, bool IsMove)?
+            GetVehicleCheckWait(int vehicleId)
+        {
+            lock (_trafficLock)
+                return _checkWaits.TryGetValue(vehicleId, out var cw)
+                    ? (cw.Holder, cw.Guarded, cw.IsMove)
+                    : null;
+        }
 
         private void RecordContention(int vehicleId, int wantedNodeId)
         {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -111,6 +111,15 @@ namespace AGV.Fleet.Infrastructure
         /// </summary>
         public IReadOnlyList<CheckRecord> GetMoveChecks(int moveId)
             => GetChecks("Move", moveId);
+
+        private Dictionary<int, int> _moveIdByKey = new();
+
+        /// <summary>Sets the NYT move key (from*10000+to) -> MoveId map.</summary>
+        public void SetMoveKeys(Dictionary<int, int> map) => _moveIdByKey = map;
+
+        /// <summary>Resolves an NYT move key to our MoveId.</summary>
+        public bool TryGetMoveId(int moveKey, out int moveId)
+            => _moveIdByKey.TryGetValue(moveKey, out moveId);
 
         /// <summary>
         /// Returns all Aplus/script checks for a node.
@@ -230,6 +239,13 @@ namespace AGV.Fleet.Infrastructure
         /// This is what gets locked if all checks pass.
         /// </summary>
         public int GuardedResourceId { get; init; }
+
+        /// <summary>
+        /// Distance checks: the guarded node only blocks if the vehicle
+        /// holding it is closer than this to the owner node (millimetres).
+        /// Null = plain node check.
+        /// </summary>
+        public int? DistanceMm { get; init; }
 
         /// <summary>
         /// Optional: engineer-specified description of what

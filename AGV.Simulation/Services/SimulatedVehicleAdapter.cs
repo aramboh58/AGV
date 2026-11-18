@@ -127,16 +127,42 @@ namespace AGV.Simulation.Services
                 serialNumber, order.OrderId, order.Nodes.Count,
                 order.Nodes.Count(n => n.Released));
 
+            // A vehicle stopped part-way along an edge (paused, then given
+            // a new route) carries on from where it is when the new order
+            // starts with that same edge. Otherwise the new route starts at
+            // the last node reached, as before.
+            var keepProgress = 0.0;
+            if (state.PendingOrder is not null && state.TravelProgress > 0)
+            {
+                var old = state.PendingOrder.Nodes
+                    .Where(n => n.Released).ToList();
+                if (state.NodeIndex + 1 < old.Count
+                    && order.Nodes.Count >= 2
+                    && order.Nodes[0].NodeId == old[state.NodeIndex].NodeId
+                    && order.Nodes[1].NodeId == old[state.NodeIndex + 1].NodeId)
+                {
+                    keepProgress = state.TravelProgress;
+                }
+            }
+
             state.PendingOrder = order;
             state.CurrentOrderId = order.OrderId;
 
             state.NodeIndex = 0;
-            state.TravelProgress = 0;
+            state.TravelProgress = keepProgress;
 
             // A loaded vehicle receiving a new order is starting its
             // drop leg: it stays in the loaded travel state.
+            // A park / charge-park order (id starts "PARK-") is not a pickup:
+            // the vehicle just drives there and goes idle - no pick.
             if (!state.StateMachine.IsLoaded)
-                state.StateMachine.TryTransition(ActivityState.TravelingToPickup);
+            {
+                if (IsParkOrder(order.OrderId))
+                    state.StateMachine.ForceTransition(
+                        ActivityState.TravelingEmpty, "park order");
+                else
+                    state.StateMachine.TryTransition(ActivityState.TravelingToPickup);
+            }
             state.StateMachine.SetOrderState(OrderState.Waiting);
 
             _logger.LogDebug(
@@ -146,6 +172,10 @@ namespace AGV.Simulation.Services
 
             return Task.CompletedTask;
         }
+
+        private static bool IsParkOrder(string? orderId)
+            => orderId is not null
+               && orderId.StartsWith("PARK-", StringComparison.Ordinal);
 
         public Task SendInstantActionAsync(
             string serialNumber,
@@ -354,6 +384,13 @@ namespace AGV.Simulation.Services
                     DischargeActivity.Idle,
             };
 
+            // A paused vehicle (manual or out of service) is standing
+            // still: it draws idle power, not travel or fork power.
+            if (state.IsPaused
+                && (dischargeActivity == DischargeActivity.Traveling
+                    || dischargeActivity == DischargeActivity.Forking))
+                dischargeActivity = DischargeActivity.Idle;
+
             if (dischargeActivity != DischargeActivity.Charging)
                 state.Battery.Discharge(
                     dischargeActivity,
@@ -435,6 +472,7 @@ namespace AGV.Simulation.Services
                 // Transition based on current activity
                 var currentActivity = state.StateMachine.Activity;
                 if (!state.TestMode
+                    && !IsParkOrder(state.CurrentOrderId)
                     && (currentActivity == ActivityState.TravelingToPickup
                         || currentActivity == ActivityState.ApproachingStand))
                 {
@@ -588,6 +626,19 @@ namespace AGV.Simulation.Services
             SimulatedVehicleState state,
             CancellationToken cancellationToken)
         {
+            // A vehicle that starts (or is restored) on a node and has not
+            // moved yet has no coordinates: take them from its node.
+            if (state.CurrentX == 0m && state.CurrentY == 0m
+                && state.CurrentNodeId > 0)
+            {
+                var startNode = RoadMap.GetNode(state.CurrentNodeId);
+                if (startNode is not null)
+                {
+                    state.CurrentX = startNode.Position.X;
+                    state.CurrentY = startNode.Position.Y;
+                }
+            }
+
             // Distance along the current move from the last node
             state.Vehicle.DistanceSinceLastNodeCm =
                 state.PendingOrder is not null

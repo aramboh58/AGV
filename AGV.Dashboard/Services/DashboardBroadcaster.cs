@@ -1,4 +1,4 @@
-using AGV.Core.Enums;
+﻿using AGV.Core.Enums;
 using AGV.Core.Logging;
 using AGV.Core.Messages;
 using AGV.Dashboard.Hubs;
@@ -424,12 +424,34 @@ namespace AGV.Dashboard.Services
                     NodeRef(graph, m.ToNodeId)))
                 .ToList();
 
-            var waitedNodes = _traffic.GetVehicleWaitedNodeIds(vehicleId)
-                .Select(id => NodeRef(graph, id) with
+            // A vehicle held by a CHECK is not waiting on its target node
+            // (that node is free): show the guarded node and who holds it.
+            var waitedNodes = new List<NodeRefDto>();
+            foreach (var id in _traffic.GetVehicleWaitedNodeIds(vehicleId))
+            {
+                var holder = _traffic.GetNodeHolderVehicleId(id);
+                if (holder is null
+                    && _traffic.GetVehicleCheckWait(vehicleId) is { } cw)
                 {
-                    HeldByVehicleId = _traffic.GetNodeHolderVehicleId(id)
-                })
-                .ToList();
+                    var guarded = cw.IsMove
+                        ? NodeRef(graph, id)
+                        : NodeRef(graph, cw.GuardedId);
+                    waitedNodes.Add(guarded with
+                    {
+                        Name = cw.IsMove
+                            ? $"check (move {cw.GuardedId}) on {id}"
+                            : "check " + (guarded.Name ?? ""),
+                        HeldByVehicleId = cw.HolderVehicleId
+                    });
+                }
+                else
+                {
+                    waitedNodes.Add(NodeRef(graph, id) with
+                    {
+                        HeldByVehicleId = holder
+                    });
+                }
+            }
 
             return new VehicleDetailDto(
                 vehicle.VehicleId,
